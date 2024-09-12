@@ -1,0 +1,20 @@
+//===-- example.cpp - Basic iteration count example -----------------*- C++
+//-*-===//
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// (c) Copyright 2024 Advanced Micro Devices, Inc. or its affiliates
+//
+
+void itercounter(int *ptr, int n) {
+
+  __builtin_assume(n >= 4);
+#pragma clang loop unroll(disable)
+
+#pragma clang loop min_iteration_count(4)
+  for (int i = 0; i < n; i++) {
+    ptr[i] = ptr[i] + 8;
+  }
+}
