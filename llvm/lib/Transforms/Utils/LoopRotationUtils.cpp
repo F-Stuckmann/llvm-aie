@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Modifications (c) Copyright 2024 Advanced Micro Devices, Inc. or its
+// affiliates
 //===----------------------------------------------------------------------===//
 //
 // This file provides utilities to convert a loop into a loop with bottom test.
@@ -33,6 +35,7 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 using namespace llvm;
@@ -51,6 +54,10 @@ static cl::opt<bool>
     MultiRotate("loop-rotate-multi", cl::init(false), cl::Hidden,
                 cl::desc("Allow loop rotation multiple times in order to reach "
                          "a better latch exit"));
+
+static cl::opt<bool>
+    EnableIterCount("loop-enable-itercount", cl::init(false), cl::Hidden,
+                    cl::desc("Use Itercount metadata to guide LoopRotation."));
 
 // Probability that a rotated loop has zero trip count / is never entered.
 static constexpr uint32_t ZeroTripCountWeights[] = {1, 127};
@@ -414,6 +421,10 @@ static void updateBranchWeights(BranchInst &PreHeaderBI, BranchInst &LoopBI,
 /// If -loop-rotate-multi is enabled we can do multiple rotations in one go
 /// so to reach a suitable (non-deoptimizing) exit.
 bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
+  // Before modifying the Loop, extract the minimum iteration count, to help
+  // with the preheader evaluation if the itercount.range MetaData is provided
+  std::optional<int> MinIterationCount = getMinIterCounts(L);
+
   // If the loop has only one block then there is not much to rotate.
   if (L->getBlocks().size() == 1)
     return false;
@@ -846,10 +857,18 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     BranchInst *PHBI = cast<BranchInst>(OrigPreheader->getTerminator());
     assert(PHBI->isConditional() && "Should be clone of BI condbr!");
     const Value *Cond = PHBI->getCondition();
-    const bool HasConditionalPreHeader =
+
+    bool HasConditionalPreHeader =
         !isa<ConstantInt>(Cond) ||
         PHBI->getSuccessor(cast<ConstantInt>(Cond)->isZero()) != NewHeader;
 
+    // use minimum iteration counts to guide the conditional preheader
+    // operation.
+
+    if (EnableIterCount && MinIterationCount.has_value() &&
+        HasConditionalPreHeader && MinIterationCount.value() > 0) {
+      HasConditionalPreHeader = false;
+    }
     updateBranchWeights(*PHBI, *BI, HasConditionalPreHeader, BISuccsSwapped);
 
     if (HasConditionalPreHeader) {

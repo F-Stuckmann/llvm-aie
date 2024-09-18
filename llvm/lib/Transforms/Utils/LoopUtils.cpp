@@ -361,6 +361,40 @@ MDNode *createMetadata(LLVMContext &Context, StringRef Name,
 }
 } // namespace
 
+std::optional<int> llvm::getMinIterCounts(const Loop *L) {
+  return getOptionalIntLoopAttribute(L, "llvm.loop.itercount.range");
+  //(MDNode *LoopID) {
+  // if (!LoopID)
+  //   return std::nullopt;
+  // const char *const IterCountName = "llvm.loop.itercount.range";
+  // for (unsigned Lop = 1; Lop < LoopID->getNumOperands(); ++Lop) {
+  //   MDNode *Node = cast<MDNode>(LoopID->getOperand(Lop));
+  //   if (Node->getNumOperands()) {
+  //     MDString *S = dyn_cast<MDString>(Node->getOperand(0));
+  //     if (S && S->getString().equals(IterCountName)) {
+  //       if (Node->getNumOperands() > 1) {
+  //         if (ConstantInt *IntMD =
+  //                 mdconst::extract_or_null<ConstantInt>(Node->getOperand(1)))
+  //                 {
+  //           return IntMD->getSExtValue();
+  //         }
+  //       }
+  //       if (Node->getNumOperands() > 2) {
+  //         if (ConstantInt *IntMD =
+  //                 mdconst::extract_or_null<ConstantInt>(Node->getOperand(2)))
+  //                 {
+  //           return IntMD->getSExtValue();
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   // raise std::logic_error("Missing Implementation of Minimum iteration
+  //   // counts!");
+  // }
+  // return std::nullopt;
+}
+
 /// Update itercounts by applying FixMin and FixMax
 MDNode *llvm::updateIterCounts(LLVMContext &Context, MDNode *LoopID,
                                std::function<int64_t(int64_t)> FixMin,
