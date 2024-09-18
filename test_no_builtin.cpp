@@ -14,7 +14,6 @@ inline void nestedLoop(int *ptr, int n) {
 }
 
 void itercounter(int *ptr, int n) {
-
 #pragma clang loop unroll(disable)
 #pragma clang loop min_iteration_count(4)
   for (int i = 0; i < n; i++) {
@@ -22,3 +21,11 @@ void itercounter(int *ptr, int n) {
     ptr[i] = ptr[i] + 8;
   }
 }
+
+// min_iteration_count will update to 4, when unrolled by 4
+// void itercounter(int *ptr, int n) {
+// #pragma clang loop min_iteration_count(4)
+//   for (int i = 0; i < n; i++) {
+//     ptr[i] = ptr[i] + 8;
+//   }
+// }
