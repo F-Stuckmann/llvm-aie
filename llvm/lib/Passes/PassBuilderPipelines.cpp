@@ -126,6 +126,7 @@
 #include "llvm/Transforms/Scalar/SpeculativeExecution.h"
 #include "llvm/Transforms/Scalar/TailRecursionElimination.h"
 #include "llvm/Transforms/Scalar/WarnMissedTransforms.h"
+#include "llvm/Transforms/Utils/AIEMetaData.h"
 #include "llvm/Transforms/Utils/AddDiscriminators.h"
 #include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
 #include "llvm/Transforms/Utils/CanonicalizeAliases.h"
@@ -463,8 +464,9 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
-  LPM1.addPass(LoopRotatePass(/* Disable header duplication */ true,
-                              isLTOPreLink(Phase)));
+  // LPM1.addPass(AIEMetaData());
+  LPM1.addPass(LoopRotatePass(
+      /* Disable header duplication */ true, isLTOPreLink(Phase)));
   // TODO: Investigate promotion cap for O1.
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/true));
@@ -644,6 +646,7 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
+  // LPM1.addPass(AIEMetaData());
   // Disable header duplication in loop rotation at -Oz.
   LPM1.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
                                   Level != OptimizationLevel::Oz,
@@ -1445,6 +1448,7 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   invokeVectorizerStartEPCallbacks(OptimizePM, Level);
 
   LoopPassManager LPM;
+  // LPM.addPass(AIEMetaData());
   // First rotate loops that may have been un-rotated by prior passes.
   // Disable header duplication at -Oz.
   LPM.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
