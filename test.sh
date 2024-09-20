@@ -31,6 +31,9 @@ START_AFTER=""
 COMARE=0
 
 workspaceFolder="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+workspaceFolder="${workspaceFolder}/results"
+rm -r ${workspaceFolder}
+mkdir -p ${workspaceFolder}
 
 if [ "${STOP_BEFORE}" != "" ] && [ "${STOP_AFTER}" != "" ]; then
   echo "Only stop-before or stop-after can be set at the same time!"
@@ -50,23 +53,30 @@ if [ "${STOP_BEFORE}" != "" ]; then
   OPTS_LLC="${OPTS_LLC} -mllvm --stop-before=${STOP_BEFORE}"
 fi
 if [ "${STOP_AFTER}" != "" ]; then
-  OPTS_LLC="${OPTS_LLC} -mllvm --stop-before=${STOP_AFTER}"
+  OPTS_LLC="${OPTS_LLC} -mllvm --stop-after=${STOP_AFTER}"
 fi
 ## Start
 if [ "${START_BEFORE}" != "" ]; then
   OPTS_LLC="${OPTS_LLC} -mllvm --start-before=${START_BEFORE}"
 fi
 if [ "${START_AFTER}" != "" ]; then
-  OPTS_LLC="${OPTS_LLC} -mllvm --start-before=${START_AFTER}"
+  OPTS_LLC="${OPTS_LLC} -mllvm --start-after=${START_AFTER}"
 fi
 if [ ${DUMP_PASS_ORDER} -ne 0 ]; then
+  GEN_RAW_IR=0
+  GEN_IR=0
+  PREFIX="PASS_ORDER"
   OPTS_LLC="-mllvm -debug-pass=Arguments"
 fi
 
+if [ $COMARE -ne 0 ]; then
+  PREFIX="compare"
+fi
+
 FILE_RAW="kernel_${PREFIX}"
-FILE_LOG="log_${PREFIX}.log"
+FILE_LOG="${workspaceFolder}/log_${PREFIX}.log"
 FILE_RAW_NO_BUILTIN="kernel_${PREFIX}_no_builtins"
-FILE_LOG_NO_BUILTIN="log_${PREFIX}_no_builtins.log"
+FILE_LOG_NO_BUILTIN="${workspaceFolder}/log_${PREFIX}_no_builtins.log"
 
 OUTPUT_BUILTIN="${workspaceFolder}/${FILE_RAW}.o"
 OUTPUT_NO_BUILTIN="${workspaceFolder}/${FILE_RAW_NO_BUILTIN}.o"
@@ -112,7 +122,7 @@ fi
 
 # without builtins
 rm ${FILE_LOG_NO_BUILTIN}
-cmd_no_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --loop-enable-itercount=1 -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_NO_BUILTIN} -x c++ ${INPUT_MOD} >${FILE_LOG_NO_BUILTIN} 2>&1"
+cmd_no_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --loop-enable-itercount=0 -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_NO_BUILTIN} -x c++ ${INPUT_MOD} >${FILE_LOG_NO_BUILTIN} 2>&1"
 eval ${cmd_no_builtins} &
 second_pid=$!
 
