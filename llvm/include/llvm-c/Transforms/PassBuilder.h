@@ -84,6 +84,9 @@ void LLVMPassBuilderOptionsSetSLPVectorization(
 void LLVMPassBuilderOptionsSetLoopUnrolling(LLVMPassBuilderOptionsRef Options,
                                             LLVMBool LoopUnrolling);
 
+void LLVMPassBuilderOptionsSetAddAssume(LLVMPassBuilderOptionsRef Options,
+                                        LLVMBool AddAssume);
+
 void LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll(
     LLVMPassBuilderOptionsRef Options, LLVMBool ForgetAllSCEVInLoopUnroll);
 

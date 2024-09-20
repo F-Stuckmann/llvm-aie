@@ -73,6 +73,11 @@ extern char &LCSSAID;
 FunctionPass *createPromoteMemoryToRegisterPass();
 
 //===----------------------------------------------------------------------===//
+// AddAssume - This pass transforms metadata into assume intrinsics.
+// A simple example is the AIE min.itercount metadata:
+Pass *createAddAssumePass();
+
+//===----------------------------------------------------------------------===//
 //
 // LoopSimplify - Insert Pre-header blocks into the CFG for every function in
 // the module.  This pass updates dominator information, loop information, and

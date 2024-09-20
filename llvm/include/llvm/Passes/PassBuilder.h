@@ -59,6 +59,10 @@ public:
   /// Tuning option to enable/disable loop unrolling. Its default value is true.
   bool LoopUnrolling;
 
+  /// Tuning option to enable/disable metadata converstion to assumptions. Its
+  /// default value is true.
+  bool AddAssume;
+
   /// Tuning option to forget all SCEV loops in LoopUnroll. Its default value
   /// is that of the flag: `-forget-scev-loop-unroll`.
   bool ForgetAllSCEVInLoopUnroll;
