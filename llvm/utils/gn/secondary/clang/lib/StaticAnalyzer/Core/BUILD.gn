@@ -43,6 +43,7 @@ static_library("Core") {
     "FunctionSummary.cpp",
     "HTMLDiagnostics.cpp",
     "LoopUnrolling.cpp",
+    "AddAssume.cpp",
     "LoopWidening.cpp",
     "MemRegion.cpp",
     "PlistDiagnostics.cpp",
