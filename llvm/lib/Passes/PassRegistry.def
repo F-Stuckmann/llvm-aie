@@ -20,7 +20,6 @@
 #endif
 MODULE_ANALYSIS("callgraph", CallGraphAnalysis())
 MODULE_ANALYSIS("collector-metadata", CollectorMetadataAnalysis())
-MODULE_ANALYSIS("aie-metadata", AddAssume())
 MODULE_ANALYSIS("inline-advisor", InlineAdvisorAnalysis())
 MODULE_ANALYSIS("ir-similarity", IRSimilarityAnalysis())
 MODULE_ANALYSIS("lcg", LazyCallGraphAnalysis())
@@ -616,6 +615,7 @@ LOOP_PASS("print<ddg>", DDGAnalysisPrinterPass(dbgs()))
 LOOP_PASS("print<iv-users>", IVUsersPrinterPass(dbgs()))
 LOOP_PASS("print<loop-cache-cost>", LoopCachePrinterPass(dbgs()))
 LOOP_PASS("print<loopnest>", LoopNestPrinterPass(dbgs()))
+LOOP_PASS("aie-metadata", AIEMetaDataPass())
 #undef LOOP_PASS
 
 #ifndef LOOP_PASS_WITH_PARAMS
