@@ -25,3 +25,17 @@ void itercounter(int *ptr, int n) {
     ptr[i] = ptr[i] + 8;
   }
 }
+
+// void conditionalLoop(int *ptr, int n) {
+
+//   if (n > 0) {
+//     __builtin_assume(n >= 4);
+// #pragma clang loop unroll(disable)
+
+// #pragma clang loop min_iteration_count(4)
+//     for (int i = 0; i < n; i++) {
+//       // nestedLoop(ptr, i);
+//       ptr[i] = ptr[i] + 8;
+//     }
+//   }
+// }

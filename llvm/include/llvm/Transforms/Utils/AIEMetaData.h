@@ -12,6 +12,7 @@
 #ifndef LLVM_TRANSFORMS_UTILS_AIEMETADATAPASS_H
 #define LLVM_TRANSFORMS_UTILS_AIEMETADATAPASS_H
 #include "llvm/IR/PassManager.h"
+#include "llvm/Passes/PassBuilder.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 
 namespace llvm {
@@ -20,14 +21,14 @@ class Loop;
 /// Loop unroll pass that will support both full and partial unrolling.
 /// It is a function pass to have access to function and module analyses.
 /// It will also put loops into canonical form (simplified and LCSSA).
-class AIEMetaDataPass : public PassInfoMixin<AIEMetaDataPass> {
+class AIEMetaData : public PassInfoMixin<AIEMetaData> {
 public:
-  //   AIEMetaDataPass() = default;
-  PreservedAnalyses run(Loop &L, LoopAnalysisManager &LAM,
+  PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
+
+  static bool isRequired() { return true; }
 };
 
-} // end namespace llvm
+} // namespace llvm
 
 #endif // LLVM_TRANSFORMS_UTILS_AIEMETADATAPASS_H
-// Pass *llvm::createAIEMetaDataPass();
