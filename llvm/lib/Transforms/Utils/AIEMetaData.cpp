@@ -30,14 +30,6 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
 
   if (MinIterCount.has_value()) {
     addAssumeToLoopPreheader(L, SE, MinIterCount.value());
-    // PreservedAnalyses PA;
-    // PA.preserve<LoopAnalysis>();
-    // PA.preserveSet<CFGAnalyses>();
-    // PA.invalidate<AssumptionCache>(); // Invalidate AssumptionAnalysis, as
-    //                                      // you modified it
-
-    // // Return PreservedAnalyses
-    // return PA;
   }
   return PreservedAnalyses::all();
 }
