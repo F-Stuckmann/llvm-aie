@@ -464,7 +464,7 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
-  // LPM1.addPass(AIEMetaData());
+  LPM1.addPass(AIEMetaData());
   LPM1.addPass(LoopRotatePass(
       /* Disable header duplication */ true, isLTOPreLink(Phase)));
   // TODO: Investigate promotion cap for O1.
@@ -646,7 +646,7 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
-  // LPM1.addPass(AIEMetaData());
+  LPM1.addPass(AIEMetaData());
   // Disable header duplication in loop rotation at -Oz.
   LPM1.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
                                   Level != OptimizationLevel::Oz,
@@ -1448,7 +1448,7 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   invokeVectorizerStartEPCallbacks(OptimizePM, Level);
 
   LoopPassManager LPM;
-  // LPM.addPass(AIEMetaData());
+  LPM.addPass(AIEMetaData());
   // First rotate loops that may have been un-rotated by prior passes.
   // Disable header duplication at -Oz.
   LPM.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
