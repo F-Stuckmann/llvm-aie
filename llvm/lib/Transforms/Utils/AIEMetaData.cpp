@@ -18,7 +18,7 @@
 
 using namespace llvm;
 
-void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE,
+void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
                               uint64_t MinIterCount);
 
 PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
@@ -29,13 +29,13 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
   std::optional<int> MinIterCount = getMinIterCounts(&L);
 
   if (MinIterCount.has_value()) {
-    addAssumeToLoopPreheader(L, SE, MinIterCount.value());
+    addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value());
   }
   return PreservedAnalyses::all();
 }
 
 // Function to add an assume in the loop preheader
-void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE,
+void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
                               uint64_t MinIterCount) {
   // Retrieve the Loop Preheader
   BasicBlock *Preheader = L.getLoopPreheader();
@@ -93,7 +93,11 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE,
     LimitVar = ICmp->getOperand(0);
     Pred = ICmp->getSwappedPredicate();
   } else {
-    assert(false && "Induction variable not found in loop exit condition.\n");
+    LLVM_DEBUG(
+        dbgs() << "Induction variable not found in loop exit condition.\n";
+        L.getHeader()->dump(); dbgs() << "\n"; BI->dump());
+    return; // assert(false && "Induction variable not found in loop exit
+            // condition.\n");
   }
 
   // Create the Assumption
@@ -154,5 +158,7 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE,
 
   // Insert the `llvm.assume` Call
   Function *AssumeFn = Intrinsic::getDeclaration(M, Intrinsic::assume);
-  Builder.CreateCall(AssumeFn, Cmp);
+  CallInst *Call = Builder.CreateCall(AssumeFn, Cmp);
+  Call->setTailCall(true);
+  AC.registerAssumption(dyn_cast<AssumeInst>(Call));
 }
