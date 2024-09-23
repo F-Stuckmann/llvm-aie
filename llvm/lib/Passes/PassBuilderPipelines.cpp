@@ -218,6 +218,10 @@ static cl::opt<bool> EnableLoopFlatten("enable-loop-flatten", cl::init(false),
                                        cl::Hidden,
                                        cl::desc("Enable the LoopFlatten Pass"));
 
+static cl::opt<bool> EnableAIEMetadataConversion(
+    "enable-aie-metadata-conversion", cl::Hidden, cl::init(false),
+    cl::desc("Enable Conversion of AIE Metadata to Assumptions."));
+
 // Experimentally allow loop header duplication. This should allow for better
 // optimization at Oz, since loop-idiom recognition can then recognize things
 // like memcpy. If this ends up being useful for many targets, we should drop
@@ -464,7 +468,9 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
-  LPM1.addPass(AIEMetaData());
+  if (EnableAIEMetadataConversion)
+    LPM1.addPass(AIEMetaData());
+
   LPM1.addPass(LoopRotatePass(
       /* Disable header duplication */ true, isLTOPreLink(Phase)));
   // TODO: Investigate promotion cap for O1.
@@ -646,7 +652,9 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
-  LPM1.addPass(AIEMetaData());
+  if (EnableAIEMetadataConversion)
+    LPM1.addPass(AIEMetaData());
+
   // Disable header duplication in loop rotation at -Oz.
   LPM1.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
                                   Level != OptimizationLevel::Oz,
@@ -1448,7 +1456,9 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   invokeVectorizerStartEPCallbacks(OptimizePM, Level);
 
   LoopPassManager LPM;
-  LPM.addPass(AIEMetaData());
+  if (EnableAIEMetadataConversion)
+    LPM.addPass(AIEMetaData());
+
   // First rotate loops that may have been un-rotated by prior passes.
   // Disable header duplication at -Oz.
   LPM.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
