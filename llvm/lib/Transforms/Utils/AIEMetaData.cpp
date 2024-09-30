@@ -19,24 +19,163 @@
 using namespace llvm;
 
 void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
-                              uint64_t MinIterCount);
+                              uint64_t MinIterCount, LLVMContext *Context);
 
 PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                                    LoopStandardAnalysisResults &AR,
                                    LPMUpdater &U) {
+  Context = &L.getHeader()->getParent()->getContext();
   ScalarEvolution &SE = AR.SE;
 
   std::optional<int> MinIterCount = getMinIterCounts(&L);
+  // since we assume that t
+
+  if (L.getLoopPreheader())
+    LLVM_DEBUG(dbgs() << "Found Preheader: " << L.getLoopPreheader()->getName()
+                      << "\n");
+  LLVM_DEBUG(dbgs() << "Preheader conditional check:"
+                    << cast<BranchInst>(L.getLoopPreheader()->getTerminator())
+                           ->isConditional()
+                    << "\n");
+  if (cast<BranchInst>(L.getLoopPreheader()->getTerminator())->isConditional())
+    LLVM_DEBUG(dbgs() << "Terminator Condition :";
+               cast<BranchInst>(L.getLoopPreheader()->getTerminator())
+                   ->getCondition()
+                   ->dump();
+               dbgs() << "\n");
 
   if (MinIterCount.has_value()) {
-    addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value());
+    LLVM_DEBUG(dbgs() << "Processing Loop Metadata of " << L.getName() << "\n");
+    addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value(), Context);
   }
+
+  LLVM_DEBUG(dbgs() << "Preheader conditional check:"
+                    << cast<BranchInst>(L.getLoopPreheader()->getTerminator())
+                           ->isConditional()
+                    << "\n");
+  if (cast<BranchInst>(L.getLoopPreheader()->getTerminator())->isConditional())
+    LLVM_DEBUG(dbgs() << "Terminator Condition :";
+               cast<BranchInst>(L.getLoopPreheader()->getTerminator())
+                   ->getCondition()
+                   ->dump();
+               dbgs() << "\n");
+
+  LLVM_DEBUG(dbgs() << "Dumping Full Function:\n";
+             L.getHeader()->getParent()->dump(););
   return PreservedAnalyses::all();
+}
+
+bool isIncrement(const SCEV *S) {
+  switch (S->getSCEVType()) {
+  case scAddRecExpr: {
+    const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
+    assert(AR->getNumOperands() == 2 &&
+           "Unknown Handling of more than 2 Operands");
+    return cast<SCEVConstant>(*AR->getOperand(1)).getValue()->getSExtValue() >
+           0;
+    break;
+  }
+
+  default:
+    assert(false && "Could not extract Iteration Variable from ");
+  }
+  return false;
+}
+
+Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context) {
+  // get start point
+
+  // increment it by
+  int IncValue = 0;
+  switch (S->getSCEVType()) {
+  case scAddRecExpr: {
+    const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
+    assert(AR->getNumOperands() == 2 &&
+           "Unknown Handling of more than 2 Operands");
+
+    if (!isa<SCEVConstant>(*AR->getOperand(1))) {
+      // FIXME: variable increments are not supported, since iteration direction
+      // is unkown! return cast<SCEVUnknown>(*AR->getOperand(1)).getValue();
+
+      LLVM_DEBUG(dbgs() << "could not extract Increment of SCEV "; S->dump());
+      return nullptr;
+    }
+
+    IncValue =
+        cast<SCEVConstant>(*AR->getOperand(1)).getValue()->getSExtValue();
+    break;
+  }
+
+  default:
+    assert(false && "Could not extract Iteration Variable from ");
+  }
+
+  int MaxValue = abs(IncValue * MinIterCount);
+  // SGT is used to compare, so I must subtract 1
+  MaxValue--;
+
+  llvm::ConstantInt *ConstIncValue =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*Context), MaxValue, true);
+  return static_cast<llvm::Value *>(ConstIncValue);
+}
+
+Value *getIterationVariable(const SCEV *S) {
+  switch (S->getSCEVType()) {
+  case scAddRecExpr: {
+    const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
+    if (!isa<SCEVUnknown>(*AR->getOperand(0)))
+      return nullptr;
+
+    assert(AR->getNumOperands() == 2 &&
+           "Unknown Handling of more than 2 Operands");
+    return cast<SCEVUnknown>(*AR->getOperand(0)).getValue();
+  }
+
+  default:
+    assert(false && "Could not extract Iteration Variable from ");
+  }
+}
+
+Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
+  // Get the loop exiting block and condition
+  BasicBlock *ExitingBlock = L.getExitingBlock();
+  if (!ExitingBlock) {
+    assert(false && "Failed to find the exiting block.\n");
+    return nullptr;
+  }
+
+  BranchInst *BI = dyn_cast<BranchInst>(ExitingBlock->getTerminator());
+  if (!BI || !BI->isConditional()) {
+    assert(false && "Exiting block does not have a conditional branch.\n");
+  }
+
+  Value *Condition = BI->getCondition();
+  ICmpInst *ICmp = dyn_cast<ICmpInst>(Condition);
+  LLVM_DEBUG(dbgs() << "Branch Instruction Found: "; ICmp->dump();
+             dbgs() << "\n");
+  if (!ICmp) {
+    assert(false && "Loop exit condition is not an integer comparison.\n");
+  }
+  // Determine the induction variable and loop limit in the comparison
+  Value *LimitVar = nullptr;
+  if (ICmp->getOperand(0) == InductionPHI) {
+    LimitVar = ICmp->getOperand(1);
+  } else if (ICmp->getOperand(1) == InductionPHI) {
+    LimitVar = ICmp->getOperand(0);
+  } else {
+    LLVM_DEBUG(
+        dbgs() << "Induction variable not found in loop exit condition.\n";
+        L.getHeader()->dump(); dbgs() << "\n"; BI->dump());
+    return nullptr; // assert(false && "Induction variable not found in loop
+                    // exit condition.\n");
+  }
+
+  return LimitVar;
 }
 
 // Function to add an assume in the loop preheader
 void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
-                              uint64_t MinIterCount) {
+                              uint64_t MinIterCount, LLVMContext *Context) {
   // Retrieve the Loop Preheader
   BasicBlock *Preheader = L.getLoopPreheader();
   if (!Preheader) {
@@ -48,113 +187,50 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   // Identify the Loop Induction Variable and Limit
   PHINode *InductionPHI = nullptr;
-  Value *LimitVar = nullptr;
-  ICmpInst::Predicate Pred;
 
   // Find the canonical induction variable
+  const SCEV *S;
   for (PHINode &PN : L.getHeader()->phis()) {
-    const SCEV *S = SE.getSCEV(&PN);
+    S = SE.getSCEV(&PN);
+
     if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S)) {
       if (AR->getLoop() == &L) {
+        LLVM_DEBUG(dbgs() << "Found Induction Phi "; S->dump());
         InductionPHI = &PN;
         break;
       }
     }
+    LLVM_DEBUG(dbgs() << "Phi "; S->dump());
   }
 
-  if (!InductionPHI) {
-    errs() << "Failed to find the induction variable.\n";
+  Value *MinValue = calcMinValue(S, MinIterCount, Context);
+  if (!MinValue) {
     return;
   }
 
-  // Get the loop exiting block and condition
-  BasicBlock *ExitingBlock = L.getExitingBlock();
-  if (!ExitingBlock) {
-    assert(false && "Failed to find the exiting block.\n");
-    return;
-  }
-
-  BranchInst *BI = dyn_cast<BranchInst>(ExitingBlock->getTerminator());
-  if (!BI || !BI->isConditional()) {
-    assert(false && "Exiting block does not have a conditional branch.\n");
-  }
-
-  Value *Condition = BI->getCondition();
-  ICmpInst *ICmp = dyn_cast<ICmpInst>(Condition);
-  if (!ICmp) {
-    assert(false && "Loop exit condition is not an integer comparison.\n");
-  }
-
-  // Determine the induction variable and loop limit in the comparison
-  if (ICmp->getOperand(0) == InductionPHI) {
-    LimitVar = ICmp->getOperand(1);
-    Pred = ICmp->getPredicate();
-  } else if (ICmp->getOperand(1) == InductionPHI) {
-    LimitVar = ICmp->getOperand(0);
-    Pred = ICmp->getSwappedPredicate();
+  Value *IterVar = nullptr;
+  if (isIncrement(S)) {
+    IterVar = getIterationVariable(L, InductionPHI);
   } else {
-    LLVM_DEBUG(
-        dbgs() << "Induction variable not found in loop exit condition.\n";
-        L.getHeader()->dump(); dbgs() << "\n"; BI->dump());
-    return; // assert(false && "Induction variable not found in loop exit
-            // condition.\n");
+    IterVar = getIterationVariable(S);
   }
 
-  // Create the Assumption
-  // Get the starting value of the induction variable from the preheader
-  Value *InductionStart = InductionPHI->getIncomingValueForBlock(Preheader);
-  if (!InductionStart) {
-    assert(false && "Failed to get induction start value.\n");
+  if (!IterVar) {
+    LLVM_DEBUG(
+        dbgs()
+        << "Could not find Iteration Variable. Will not process Metadata\n");
+    return;
   }
+
+  LLVM_DEBUG(dbgs() << "Minimum Value : "; MinValue->dump());
+  LLVM_DEBUG(dbgs() << "Iteration Variable : "; IterVar->dump());
 
   IRBuilder<> Builder(Preheader->getTerminator());
-
-  // Ensure types match
-  if (InductionStart->getType() != LimitVar->getType()) {
-    InductionStart =
-        Builder.CreateSExtOrTrunc(InductionStart, LimitVar->getType());
-  }
-
-  // Calculate InductionStart + MinIterCount
-  ConstantInt *MinIterConst = dyn_cast<ConstantInt>(
-      ConstantInt::get(LimitVar->getType(), MinIterCount));
-  Value *MinValue = Builder.CreateAdd(InductionStart, MinIterConst);
-
-  // Depending on the predicate, adjust the comparison
   Value *Cmp = nullptr;
-  switch (Pred) {
-  case ICmpInst::ICMP_SLT:
-  case ICmpInst::ICMP_ULT:
-    // Loop condition is InductionPHI < LimitVar
-    // So we assume LimitVar >= InductionStart + MinIterCount
-    Cmp = Builder.CreateICmpSGE(LimitVar, MinValue);
-    break;
-  case ICmpInst::ICMP_SGT:
-  case ICmpInst::ICMP_UGT:
-    // Loop condition is InductionPHI > LimitVar
-    // So we assume LimitVar <= InductionStart - MinIterCount
-    MinValue = Builder.CreateSub(InductionStart, MinIterConst);
-    Cmp = Builder.CreateICmpSLE(LimitVar, MinValue);
-    break;
-  case ICmpInst::ICMP_SLE:
-  case ICmpInst::ICMP_ULE:
-    // Loop condition is InductionPHI <= LimitVar
-    // So we assume LimitVar >= InductionStart + MinIterCount - 1
-    MinValue =
-        Builder.CreateSub(MinValue, ConstantInt::get(LimitVar->getType(), 1));
-    Cmp = Builder.CreateICmpSGE(LimitVar, MinValue);
-    break;
-  case ICmpInst::ICMP_SGE:
-  case ICmpInst::ICMP_UGE:
-    // Loop condition is InductionPHI >= LimitVar
-    // So we assume LimitVar <= InductionStart - MinIterCount + 1
-    MinValue =
-        Builder.CreateAdd(MinValue, ConstantInt::get(LimitVar->getType(), -1));
-    Cmp = Builder.CreateICmpSLE(LimitVar, MinValue);
-    break;
-  default:
-    assert(false && "Unsupported loop predicate.\n");
-  }
+  Cmp = Builder.CreateICmpSGT(IterVar, MinValue);
+
+  LLVM_DEBUG(dbgs() << "Inserting Condition:"; MinValue->dump();
+             dbgs() << "With Comparator:"; Cmp->dump());
 
   // Insert the `llvm.assume` Call
   Function *AssumeFn = Intrinsic::getDeclaration(M, Intrinsic::assume);

@@ -22,6 +22,9 @@ class Loop;
 /// It is a function pass to have access to function and module analyses.
 /// It will also put loops into canonical form (simplified and LCSSA).
 class AIEMetaData : public PassInfoMixin<AIEMetaData> {
+private:
+  LLVMContext *Context;
+
 public:
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
