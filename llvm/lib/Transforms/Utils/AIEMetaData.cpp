@@ -144,6 +144,20 @@ Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
     return nullptr;
   }
 
+  Value *LoopCounter;
+  for (uint I = 0; I < InductionPHI->getNumIncomingValues(); I++) {
+    if (InductionPHI->getIncomingBlock(I) == ExitingBlock) {
+      LoopCounter = InductionPHI->getOperand(I);
+    }
+  }
+  if (!LoopCounter) {
+    LLVM_DEBUG(dbgs() << "Could not extract LoopCounter Variable from ";
+               InductionPHI->dump(););
+    return nullptr;
+  }
+
+  // verify that it is in the comparison!
+
   BranchInst *BI = dyn_cast<BranchInst>(ExitingBlock->getTerminator());
   if (!BI || !BI->isConditional()) {
     assert(false && "Exiting block does not have a conditional branch.\n");
@@ -156,13 +170,14 @@ Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
   if (!ICmp) {
     assert(false && "Loop exit condition is not an integer comparison.\n");
   }
-  // Determine the induction variable and loop limit in the comparison
-  Value *LimitVar = nullptr;
-  if (ICmp->getOperand(0) == InductionPHI) {
-    LimitVar = ICmp->getOperand(1);
-  } else if (ICmp->getOperand(1) == InductionPHI) {
-    LimitVar = ICmp->getOperand(0);
-  } else {
+
+  Value *InductionVar;
+  for (uint I = 0; I < ICmp->getNumOperands(); I++) {
+    if (ICmp->getOperand(I) != InductionVar)
+      InductionVar = ICmp->getOperand(I);
+  }
+
+  if (!InductionVar) {
     LLVM_DEBUG(
         dbgs() << "Induction variable not found in loop exit condition.\n";
         L.getHeader()->dump(); dbgs() << "\n"; BI->dump());
@@ -170,7 +185,7 @@ Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
                     // exit condition.\n");
   }
 
-  return LimitVar;
+  return InductionVar;
 }
 
 // Function to add an assume in the loop preheader
