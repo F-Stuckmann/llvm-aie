@@ -13,22 +13,24 @@ pkill meld
 INPUT=test.cpp
 INPUT_MOD=test_no_builtin.cpp
 
-OPT_LEVEL=" -O2 "
+OPT_LEVEL=" -O2"
 
 PREFIX=""
 
 GEN_RAW_IR=0
-GEN_IR=1
 
-DUMP_PASS_IR=1
+GEN_IR=0
+DUMP_PASS_IR=0
+
 DUMP_PASS_ORDER=0
-DEBUG_PASSES=""
+DEBUG_PASSES="aie-metadata,loop-rotate"
+#
 STOP_BEFORE="" # inling
 STOP_AFTER=""
 START_BEFORE="" # inling
 START_AFTER=""
 
-COMARE=0
+COMARE=1
 
 workspaceFolder="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 workspaceFolder="${workspaceFolder}/results"
@@ -106,7 +108,7 @@ cd ..
 if [ ${COMARE} -eq 0 ]; then
   # with builtins
   rm ${FILE_LOG}
-  cmd_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_BUILTIN} -x c++ ${INPUT} >${FILE_LOG} 2>&1"
+  cmd_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --enable-aie-metadata-conversion=0 -D ASSERT_ENABLE -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_BUILTIN} -x c++ ${INPUT} >${FILE_LOG} 2>&1"
   echo "${cmd_builtins}"
   eval ${cmd_builtins} &
   first_pid=$!
@@ -114,7 +116,7 @@ if [ ${COMARE} -eq 0 ]; then
 else
   # disable loop
   rm ${FILE_LOG}
-  cmd_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --loop-enable-itercount=0 -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_BUILTIN} -x c++ ${INPUT_MOD} >${FILE_LOG} 2>&1"
+  cmd_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --enable-aie-metadata-conversion=0 -emit-obj -D ASSERT_ENABLE  ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_BUILTIN} -x c++ ${INPUT_MOD} >${FILE_LOG} 2>&1"
   echo "${cmd_builtins}"
   eval ${cmd_builtins} &
   first_pid=$!
@@ -122,7 +124,7 @@ fi
 
 # without builtins
 rm ${FILE_LOG_NO_BUILTIN}
-cmd_no_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --loop-enable-itercount=0 -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_NO_BUILTIN} -x c++ ${INPUT_MOD} >${FILE_LOG_NO_BUILTIN} 2>&1"
+cmd_no_builtins="./build/bin/clang  -cc1 -triple aie2-none-unknown-elf -mllvm --enable-aie-metadata-conversion=1 -emit-obj ${OPT_LEVEL} ${OPTS_LLC} ${OPTS_ASM} -o ${OUTPUT_NO_BUILTIN} -x c++ ${INPUT_MOD} >${FILE_LOG_NO_BUILTIN} 2>&1"
 eval ${cmd_no_builtins} &
 second_pid=$!
 
@@ -143,6 +145,8 @@ echo "meld ${OUTPUT_BUILTIN} ${OUTPUT_NO_BUILTIN}"
 
 meld -n ${FILE_LOG} ${FILE_LOG_NO_BUILTIN} &
 meld -n ${OUTPUT_BUILTIN} ${OUTPUT_NO_BUILTIN} &
+
+# code --diff ${FILE_LOG} ${FILE_LOG_NO_BUILTIN}
 
 # ./build/bin/llvm-dis ${OUTPUT_BUILTIN} -o ${OUTPUT_BUILTIN}
 # ./build/bin/llvm-dis ${OUTPUT_BUILTIN} -o ${OUTPUT_BUILTIN}
