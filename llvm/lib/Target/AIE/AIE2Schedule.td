@@ -181,9 +181,33 @@ def II_JNZ : InstrItinClass;
 def II_JNZD : InstrItinClass;
 def II_JZ : InstrItinClass;
 def II_LDA : InstrItinClass;
+def II_LDA_DC : InstrItinClass;
+def II_LDA_DJ : InstrItinClass;
+def II_LDA_DN : InstrItinClass;
+def II_LDA_M : InstrItinClass;
+def II_LDA_P : InstrItinClass;
+def II_LDA_R : InstrItinClass;
 def II_LDA_POST_1D : InstrItinClass;
+def II_LDA_POST_1D_DC : InstrItinClass;
+def II_LDA_POST_1D_DJ : InstrItinClass;
+def II_LDA_POST_1D_DN : InstrItinClass;
+def II_LDA_POST_1D_M : InstrItinClass;
+def II_LDA_POST_1D_P : InstrItinClass;
+def II_LDA_POST_1D_R : InstrItinClass;
 def II_LDA_POST_2D : InstrItinClass;
+def II_LDA_POST_2D_DC : InstrItinClass;
+def II_LDA_POST_2D_DJ : InstrItinClass;
+def II_LDA_POST_2D_DN : InstrItinClass;
+def II_LDA_POST_2D_M : InstrItinClass;
+def II_LDA_POST_2D_P : InstrItinClass;
+def II_LDA_POST_2D_R : InstrItinClass;
 def II_LDA_POST_3D : InstrItinClass;
+def II_LDA_POST_3D_DC : InstrItinClass;
+def II_LDA_POST_3D_DJ : InstrItinClass;
+def II_LDA_POST_3D_DN : InstrItinClass;
+def II_LDA_POST_3D_M : InstrItinClass;
+def II_LDA_POST_3D_P : InstrItinClass;
+def II_LDA_POST_3D_R : InstrItinClass;
 def II_LDA_TM : InstrItinClass;
 def II_LSHL : InstrItinClass;
 def II_LT : InstrItinClass;
@@ -309,7 +333,20 @@ def II_VMACf : InstrItinClass;
 def II_VMAX_LT : InstrItinClass;
 def II_VMIN_GE : InstrItinClass;
 def II_VMOV_W : InstrItinClass;
+def II_VMOV_W_CM_CM : InstrItinClass;
+def II_VMOV_W_CM_WMH : InstrItinClass;
+def II_VMOV_W_WMH_CM : InstrItinClass;
+def II_VMOV_W_CM_WML : InstrItinClass;
+def II_VMOV_W_WML_CM : InstrItinClass;
+def II_VMOV_W_WMH_WMH : InstrItinClass;
+def II_VMOV_W_WML_WMH : InstrItinClass;
+def II_VMOV_W_WMH_WML : InstrItinClass;
+def II_VMOV_W_WML_WML : InstrItinClass;
 def II_VMOV_X : InstrItinClass;
+def II_VMOV_X_BM_BM : InstrItinClass;
+def II_VMOV_X_BM_XM : InstrItinClass;
+def II_VMOV_X_XM_BM : InstrItinClass;
+def II_VMOV_X_XM_XM : InstrItinClass;
 def II_VMOV_CM : InstrItinClass;
 def II_VMOV_CASCADE_READ : InstrItinClass;
 def II_VMOV_CASCADE_WRITE : InstrItinClass;
@@ -428,23 +465,120 @@ MemInstrItinData<II_LDA,
      PrefixCycle<DN_WM_PORT>, PrefixCycle<DC_WM_PORT>, SimpleCycle<R_WA_PORT>],
     [7,1,1],
     MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_DC,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DC_WM_PORT>], [7,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_DJ,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DJ_WM_PORT>], [7,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_DN,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DN_WM_PORT>], [7,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_M,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<M_WM_PORT>], [7,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_P,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<P_WM_PORT>], [7,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_R,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<R_WA_PORT>], [7,1,1],
+    MemoryCycles<[5]>>,
 MemInstrItinData<II_LDA_POST_1D,
     [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>, EmptyCycles<4>,
      PrefixCycle<P_WM_PORT>, PrefixCycle<M_WM_PORT>, PrefixCycle<DJ_WM_PORT>,
      PrefixCycle<DN_WM_PORT>, PrefixCycle<DC_WM_PORT>, SimpleCycle<R_WA_PORT>],
     [7,1,1,1],
     MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_1D_DC,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DC_WM_PORT>], [7,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_1D_DJ,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DJ_WM_PORT>], [7,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_1D_DN,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DN_WM_PORT>], [7,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_1D_M,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<M_WM_PORT>], [7,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_1D_P,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<P_WM_PORT>], [7,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_1D_R,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<R_WA_PORT>], [7,1,1,1],
+    MemoryCycles<[5]>>,
 MemInstrItinData<II_LDA_POST_2D,
-    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>, EmptyCycles<4>,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+  	 EmptyCycles<4>,
      PrefixCycle<P_WM_PORT>, PrefixCycle<M_WM_PORT>, PrefixCycle<DJ_WM_PORT>,
      PrefixCycle<DN_WM_PORT>, PrefixCycle<DC_WM_PORT>, SimpleCycle<R_WA_PORT>],
     [7,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_2D_DC,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DC_WM_PORT>], [7,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_2D_DJ,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DJ_WM_PORT>], [7,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_2D_DN,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DN_WM_PORT>], [7,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_2D_M,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<M_WM_PORT>], [7,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_2D_P,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<P_WM_PORT>], [7,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_2D_R,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<R_WA_PORT>], [7,1,1,1,1],
     MemoryCycles<[5]>>,
 MemInstrItinData<II_LDA_POST_3D,
     [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>, EmptyCycles<4>,
      PrefixCycle<P_WM_PORT>, PrefixCycle<M_WM_PORT>, PrefixCycle<DJ_WM_PORT>,
      PrefixCycle<DN_WM_PORT>, PrefixCycle<DC_WM_PORT>, SimpleCycle<R_WA_PORT>],
     [7,1,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_3D_DC,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DC_WM_PORT>], [7,1,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_3D_DJ,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DJ_WM_PORT>], [7,1,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_3D_DN,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<DN_WM_PORT>], [7,1,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_3D_M,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<M_WM_PORT>], [7,1,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_3D_P,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<P_WM_PORT>], [7,1,1,1,1,1],
+    MemoryCycles<[5]>>,
+MemInstrItinData<II_LDA_POST_3D_R,
+    [AvoidPartWordStore, EmptyCycles<1>, SimpleCycle<LOAD_UNIT_A>,
+	EmptyCycles<4>, SimpleCycle<R_WA_PORT>], [7,1,1,1,1,1],
     MemoryCycles<[5]>>,
 MemInstrItinData<II_LDA_TM,
     [SimpleCycle<PROC_BUS>, SimpleCycle<LOAD_UNIT_A>, EmptyCycles<4>,
@@ -815,19 +949,36 @@ InstrItinData<II_VMSCf, [InstrStage<1, [R_RV_PORT]>, EmptyCycles<4>, InstrStage<
               [6,3,1,1,1,/*srFPFlags*/7, /*crFPMask*/7]>,
 InstrItinData<II_VMOV_D, [EmptyCycles<4>, InstrStage<1, [CM_WA_PORT]>],
               [5,3], [VEC_Bypass,NoBypass]>,
-// VMOV_W supports bypasses (in both directions) only for wl registers, not for wh registers.
-// This itinerary will be used by Pre-RA scheduling in particular. As the
-// assigned phys regs aren't known, conservatively assume no Bypass.
-// However, Post-RA scheduling needs an exact itinerary, otherwise we might give
-// an optimistic latency to anti-dependencies.
-// See schedule/negative_latencies/bypass.mir for details.
-// FIXME: II_VMOV_W and II_VMOV_X always book both the vector and accumulator read and write ports.
-// That is overly pessimistic as the instructions actually only use the port according to the register
-// they are reading/writing. We need to find a way to dynamically select itineraries for an instruction
-// based on its operands.
-InstrItinData<II_VMOV_W, [InstrStage<1, [CM_RM_PORT]>, PrefixCycle<W_WM_PORT>, SimpleCycle<CM_WM_PORT>],
+InstrItinData<II_VMOV_W, [SimpleCycle<CM_RM_PORT>, PrefixCycle<W_WM_PORT>, SimpleCycle<CM_WM_PORT>],
               [2,1], [NoBypass, NoBypass]>,
+InstrItinData<II_VMOV_W_CM_CM, [SimpleCycle<CM_RM_PORT>, SimpleCycle<CM_WM_PORT>],
+              [2,1], [NoBypass, NoBypass]>,
+InstrItinData<II_VMOV_W_WMH_CM, [SimpleCycle<CM_RM_PORT>, SimpleCycle<W_WM_PORT>],
+              [2,1], [NoBypass, NoBypass]>,
+InstrItinData<II_VMOV_W_CM_WMH, [EmptyCycles<1>, SimpleCycle<CM_WM_PORT>],
+              [2,1], [NoBypass, NoBypass]>,
+InstrItinData<II_VMOV_W_WML_CM, [SimpleCycle<CM_RM_PORT>, SimpleCycle<W_WM_PORT>],
+              [2,1], [MOV_Bypass, NoBypass]>,
+InstrItinData<II_VMOV_W_CM_WML, [EmptyCycles<1>, SimpleCycle<CM_WM_PORT>],
+              [2,1], [NoBypass, MOV_Bypass]>,
+InstrItinData<II_VMOV_W_WMH_WMH, [EmptyCycles<1>, SimpleCycle<W_WM_PORT>],
+              [2,1], [NoBypass, NoBypass]>,
+InstrItinData<II_VMOV_W_WML_WMH, [EmptyCycles<1>, SimpleCycle<W_WM_PORT>],
+              [2,1], [MOV_Bypass, NoBypass]>,
+InstrItinData<II_VMOV_W_WMH_WML, [EmptyCycles<1>, SimpleCycle<W_WM_PORT>],
+              [2,1], [NoBypass, MOV_Bypass]>,
+InstrItinData<II_VMOV_W_WML_WML, [EmptyCycles<1>, SimpleCycle<W_WM_PORT>],
+              [2,1], [MOV_Bypass, MOV_Bypass]>,
+// FIXME: Remove MOV_Bypass from II_VMOV_X once VCONV_FP32_BF16 starts using new reg base itineraries
 InstrItinData<II_VMOV_X, [SimpleCycle<CM_RM_PORT>, PrefixCycle<W_WM_PORT>, SimpleCycle<CM_WM_PORT>],
+              [2,1], [MOV_Bypass, MOV_Bypass]>,
+InstrItinData<II_VMOV_X_BM_BM, [SimpleCycle<CM_RM_PORT>, SimpleCycle<CM_WM_PORT>],
+              [2,1], [NoBypass, NoBypass]>,
+InstrItinData<II_VMOV_X_XM_BM, [SimpleCycle<CM_RM_PORT>, SimpleCycle<W_WM_PORT>],
+              [2,1], [MOV_Bypass, NoBypass]>,
+InstrItinData<II_VMOV_X_BM_XM, [EmptyCycles<1>, SimpleCycle<CM_WM_PORT>],
+              [2,1], [NoBypass, MOV_Bypass]>,
+InstrItinData<II_VMOV_X_XM_XM, [EmptyCycles<1>, SimpleCycle<W_WM_PORT>],
               [2,1], [MOV_Bypass, MOV_Bypass]>,
 InstrItinData<II_VMOV_CM, [InstrStage<1, [CM_RM_PORT]>, InstrStage<1,  [CM_WM_PORT]>], [2,1]>,
 
