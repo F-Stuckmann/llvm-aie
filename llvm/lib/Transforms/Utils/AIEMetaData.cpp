@@ -206,6 +206,8 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   // Find the canonical induction variable
   const SCEV *S;
   for (PHINode &PN : L.getHeader()->phis()) {
+    if (!SE.isSCEVable(PN.getType()))
+      continue;
     S = SE.getSCEV(&PN);
 
     if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S)) {
@@ -231,10 +233,13 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   }
 
   if (!IterVar) {
-    LLVM_DEBUG(
-        dbgs()
-        << "Could not find Iteration Variable. Will not process Metadata\n");
-    return;
+    IterVar = L.getInductionVariable(SE);
+    if (!IterVar) {
+      LLVM_DEBUG(
+          dbgs()
+          << "Could not find Iteration Variable. Will not process Metadata\n");
+      return;
+    }
   }
 
   LLVM_DEBUG(dbgs() << "Minimum Value : "; MinValue->dump());
