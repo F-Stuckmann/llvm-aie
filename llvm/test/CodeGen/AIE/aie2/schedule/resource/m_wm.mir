@@ -447,3 +447,185 @@ body:             |
     $m1 = MOVXM_lng_cg 0
     $p0 = MOVA_lda_cg 0
 ...
+
+---
+name:            lda_to_M
+alignment:       16
+body:             |
+  bb.0.entry:
+    ; CHECK-LABEL: name: lda_to_M
+    ; CHECK: BUNDLE implicit-def $m1, implicit-def $r1, implicit-def $r2, implicit killed $p0, implicit killed $dj0, implicit $r4 {
+    ; CHECK-NEXT:   $m1 = LDA_dms_lda_idx killed $p0, killed $dj0
+    ; CHECK-NEXT:   $r1 = MOVX_alu_cg 0
+    ; CHECK-NEXT:   $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: }
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $dc0 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl killed $r4
+    $m1 = LDA_dms_lda_idx $p0, $dj0
+    $r1 = MOVX_alu_cg 0
+    $dc0 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+...
+
+---
+name:            ldaImm_to_M
+alignment:       16
+body:             |
+  bb.0.entry:
+    ; CHECK-LABEL: name: ldaImm_to_M
+    ; CHECK: BUNDLE implicit-def $m1, implicit-def $r1, implicit-def $r2, implicit killed $p0, implicit $r4 {
+    ; CHECK-NEXT:   $m1 = LDA_dms_lda_idx_imm killed $p0, 0
+    ; CHECK-NEXT:   $r1 = MOVX_alu_cg 0
+    ; CHECK-NEXT:   $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: }
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $dc0 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl killed $r4
+    $m1 = LDA_dms_lda_idx_imm $p0, 0
+    $r1 = MOVX_alu_cg 0
+    $dc0 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+...
+
+---
+name:            ldaPost_to_M
+alignment:       16
+body:             |
+  bb.0.entry:
+    ; CHECK-LABEL: name: ldaPost_to_M
+    ; CHECK: BUNDLE implicit-def $m1, implicit-def $p0, implicit-def $r1, implicit-def $r2, implicit killed $p0, implicit killed $m0, implicit $r4 {
+    ; CHECK-NEXT:   $m1, $p0 = LDA_dms_lda_pstm_nrm killed $p0, killed $m0
+    ; CHECK-NEXT:   $r1 = MOVX_alu_cg 0
+    ; CHECK-NEXT:   $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: }
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $dc0 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl killed $r4
+    $m1, $p0 = LDA_dms_lda_pstm_nrm $p0, $m0
+    $r1 = MOVX_alu_cg 0
+    $dc0 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+...
+
+---
+name:            ldaPostImm_to_M
+alignment:       16
+body:             |
+  bb.0.entry:
+    ; CHECK-LABEL: name: ldaPostImm_to_M
+    ; CHECK: BUNDLE implicit-def $m1, implicit-def $p0, implicit-def $r1, implicit-def $r2, implicit killed $p0, implicit $r4 {
+    ; CHECK-NEXT:   $m1, $p0 = LDA_dms_lda_pstm_nrm_imm killed $p0, 0
+    ; CHECK-NEXT:   $r1 = MOVX_alu_cg 0
+    ; CHECK-NEXT:   $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: }
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $dc0 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $r2 = MOV_mv_scl killed $r4
+    $m1, $p0 = LDA_dms_lda_pstm_nrm_imm $p0, 0
+    $r1 = MOVX_alu_cg 0
+    $dc0 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+    $r2 = MOV_mv_scl $r4
+...
+
+---
+name:            lda2DPost_to_M
+alignment:       16
+body:             |
+  bb.0.entry:
+    ; CHECK-LABEL: name: lda2DPost_to_M
+    ; CHECK: BUNDLE implicit-def $m1, implicit-def $p0, implicit-def $dc0, implicit-def $r1, implicit-def $p2, implicit killed $p0, implicit killed $d0, implicit $r4 {
+    ; CHECK-NEXT:   $m1, $p0, $dc0 = LDA_2D_dms_lda killed $p0, killed $d0
+    ; CHECK-NEXT:   $r1 = MOVX_alu_cg 0
+    ; CHECK-NEXT:   $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: }
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl killed $r4
+    $m1, $p0, $dc0 = LDA_2D_dms_lda $p0, $d0
+    $r1 = MOVX_alu_cg 0
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+...
+
+---
+name:            lda3DPost_to_M
+alignment:       16
+body:             |
+  bb.0.entry:
+    ; CHECK-LABEL: name: lda3DPost_to_M
+    ; CHECK: BUNDLE implicit-def $m1, implicit-def $p0, implicit-def $dc0, implicit-def $dc4, implicit-def $r1, implicit-def $p2, implicit killed $p0, implicit killed $d0_3d, implicit $r4 {
+    ; CHECK-NEXT:   $m1, $p0, $dc0, $dc4 = LDA_3D_dms_lda killed $p0, killed $d0_3d
+    ; CHECK-NEXT:   $r1 = MOVX_alu_cg 0
+    ; CHECK-NEXT:   $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: }
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $dj0 = MOV_mv_scl $r4
+    ; CHECK-NEXT: $p2 = MOV_mv_scl killed $r4
+    $m1, $p0, $dc0, $dc4 = LDA_3D_dms_lda $p0, $d0_3d
+    $r1 = MOVX_alu_cg 0
+    $dj0 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+    $p2 = MOV_mv_scl $r4
+...

@@ -103,7 +103,8 @@ let Itinerary = II_XOR in {
   def XOR : AIE2_alu_r_rr_inst_alu<0b0110, (outs eR:$mRx), (ins eR:$mRx0, eR:$mRy), "xor", "$mRx, $mRx0, $mRy">;
 }
 let  mayLoad = true, mayStore = false in {
-  let Itinerary = II_LDA in {
+  // Part-word load writes only to R type register
+  let Itinerary = II_LDA_R in {
     def LDA_S8_ag_idx_imm : AIE2_dmhb_lda_inst_lda<0b00, (outs eR:$mRa) , (ins  eP:$ptr, simm3:$imm  ), "lda.s8", "$mRa, [$ptr, $imm]">,
       AIE2_ag_nospill__ag_idx_imm;
     def LDA_S8_ag_idx : AIE2_dmhb_lda_inst_lda<0b00, (outs eR:$mRa) , (ins  eP:$ptr, eDJ:$dj  ), "lda.s8", "$mRa, [$ptr, $dj]">,
@@ -125,7 +126,8 @@ let  mayLoad = true, mayStore = false in {
       AIE2_ag_nospill__ag_idx;
   }
 
-  let Itinerary = II_LDA_POST_1D, Constraints = "$ptr_out = $ptr" in {
+  //Part-word load writes only to R type register
+  let Itinerary = II_LDA_POST_1D_R, Constraints = "$ptr_out = $ptr" in {
     def LDA_S8_ag_pstm_nrm_imm : AIE2_dmhb_lda_inst_lda<0b00, (outs eR:$mRa, eP:$ptr_out) , (ins  eP:$ptr, simm4:$imm  ), "lda.s8", "$mRa, [$ptr], $imm">,
       AIE2_ag_nospill__ag_pstm_nrm_imm;
     def LDA_S8_ag_pstm_nrm : AIE2_dmhb_lda_inst_lda<0b00, (outs eR:$mRa, eP:$ptr_out) , (ins  eP:$ptr, eM:$mod  ), "lda.s8", "$mRa, [$ptr], $mod">,
@@ -201,33 +203,54 @@ let mayLoad = true, mayStore = true in {
 }
 let mayLoad = true, mayStore = false in {
   let Itinerary = II_LDA in {
-  def LDA_dms_lda_idx : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl) , (ins eP:$ptr, eDJ:$dj),
-      "lda", "$mLdaScl, [$ptr, $dj]">, 
-    AIE2_ag_all__ag_idx;
-  def LDA_dms_lda_idx_imm : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl) , (ins eP:$ptr, imm6x4:$imm),
-      "lda", "$mLdaScl, [$ptr, $imm]">, 
-    AIE2_ag_all__ag_idx_imm;
+  let ItineraryRegPairs = [ItinRegClassPair<II_LDA_R,[OperandRegClass<0, eR>]>,
+                           ItinRegClassPair<II_LDA_P,[OperandRegClass<0, eP>]>,
+                           ItinRegClassPair<II_LDA_M,[OperandRegClass<0, eM>]>,
+                           ItinRegClassPair<II_LDA_DC,[OperandRegClass<0, eDC>]>,
+                           ItinRegClassPair<II_LDA_DJ,[OperandRegClass<0, eDJ>]>,
+                           ItinRegClassPair<II_LDA_DN,[OperandRegClass<0, eDN>]>] in {
+    def LDA_dms_lda_idx : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl) , (ins eP:$ptr, eDJ:$dj),
+        "lda", "$mLdaScl, [$ptr, $dj]">, 
+      AIE2_ag_all__ag_idx;
+    def LDA_dms_lda_idx_imm : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl) , (ins eP:$ptr, imm6x4:$imm),
+        "lda", "$mLdaScl, [$ptr, $imm]">, 
+      AIE2_ag_all__ag_idx_imm;
+    }
   }
   let Itinerary = II_LDA_POST_1D, Constraints = "$ptr = $ptr_out" in {
-    def LDA_dms_lda_pstm_nrm : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl, eP:$ptr_out ) , (ins eP:$ptr, eM:$mod),
-        "lda", "$mLdaScl, [$ptr], $mod">,
-      AIE2_ag_all__ag_pstm_nrm;
-    def LDA_dms_lda_pstm_nrm_imm : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl, eP:$ptr_out ) , (ins eP:$ptr, imm7x4:$imm),
-        "lda", "$mLdaScl, [$ptr], $imm">,
-      AIE2_ag_all__ag_pstm_nrm_imm;
+    let ItineraryRegPairs = [ItinRegClassPair<II_LDA_POST_1D_R,[OperandRegClass<0, eR>]>,
+                             ItinRegClassPair<II_LDA_POST_1D_P,[OperandRegClass<0, eP>]>, 
+                             ItinRegClassPair<II_LDA_POST_1D_M,[OperandRegClass<0, eM>]>,
+                             ItinRegClassPair<II_LDA_POST_1D_DC,[OperandRegClass<0, eDC>]>,
+                             ItinRegClassPair<II_LDA_POST_1D_DJ,[OperandRegClass<0, eDJ>]>,
+                             ItinRegClassPair<II_LDA_POST_1D_DN,[OperandRegClass<0, eDN>]>] in {
+      def LDA_dms_lda_pstm_nrm : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl, eP:$ptr_out ) , (ins eP:$ptr, eM:$mod),
+          "lda", "$mLdaScl, [$ptr], $mod">,
+        AIE2_ag_all__ag_pstm_nrm;
+      def LDA_dms_lda_pstm_nrm_imm : AIE2_dms_lda_inst_lda< (outs OP_mLdaScl:$mLdaScl, eP:$ptr_out ) , (ins eP:$ptr, imm7x4:$imm),
+          "lda", "$mLdaScl, [$ptr], $imm">,
+        AIE2_ag_all__ag_pstm_nrm_imm;
+    }
   }
 
   let Itinerary = II_LDA_POST_2D, Constraints = "$ptr = $ptr_out" in {
-    let DecoderMethod = "DecodeLDA_2D_Instruction" in {
+    let ItineraryRegPairs = [ItinRegClassPair<II_LDA_POST_2D_R,[OperandRegClass<0, eR>]>,
+                             ItinRegClassPair<II_LDA_POST_2D_P,[OperandRegClass<0, eP>]>, 
+                             ItinRegClassPair<II_LDA_POST_2D_M,[OperandRegClass<0, eM>]>,
+                             ItinRegClassPair<II_LDA_POST_2D_DC,[OperandRegClass<0, eDC>]>,
+                             ItinRegClassPair<II_LDA_POST_2D_DJ,[OperandRegClass<0, eDJ>]>,
+                             ItinRegClassPair<II_LDA_POST_2D_DN,[OperandRegClass<0, eDN>]>], 
+               DecoderMethod = "DecodeLDA_2D_Instruction" in {
       def LDA_2D_dms_lda : AIE2_dms_lda_inst_lda<
         (outs OP_mLdaScl:$mLdaScl, eP:$ptr_out, eDC:$count_out),
         (ins eP:$ptr, eD:$mod),
         "lda.2d", "$mLdaScl, [$ptr], $mod">,
       AIE2_ag_all__ag_pstm_2d;
     }
+  }
 
+  let Itinerary = II_LDA_POST_2D_R, Constraints = "$ptr = $ptr_out" in {
     let DecoderMethod = "DecodeLDA_2D_HBInstruction" in {
-
       def LDA_2D_S8_dmhb_lda : AIE2_dmhb_lda_inst_lda<0b00,
         (outs eR:$mRa, eP:$ptr_out, eDC:$count_out),
         (ins  eP:$ptr, eD:$mod  ),
@@ -255,14 +278,22 @@ let mayLoad = true, mayStore = false in {
   }
 
   let Itinerary = II_LDA_POST_3D, Constraints = "$ptr = $ptr_out" in {
-    let DecoderMethod = "DecodeLDA_3D_Instruction" in {
+    let ItineraryRegPairs = [ItinRegClassPair<II_LDA_POST_3D_R,[OperandRegClass<0, eR>]>,
+                             ItinRegClassPair<II_LDA_POST_3D_P,[OperandRegClass<0, eP>]>, 
+                             ItinRegClassPair<II_LDA_POST_3D_M,[OperandRegClass<0, eM>]>,
+                             ItinRegClassPair<II_LDA_POST_3D_DC,[OperandRegClass<0, eDC>]>,
+                             ItinRegClassPair<II_LDA_POST_3D_DJ,[OperandRegClass<0, eDJ>]>,
+                             ItinRegClassPair<II_LDA_POST_3D_DN,[OperandRegClass<0, eDN>]>],
+               DecoderMethod = "DecodeLDA_3D_Instruction" in {
       def LDA_3D_dms_lda : AIE2_dms_lda_inst_lda<
         (outs OP_mLdaScl:$mLdaScl, eP:$ptr_out, eDC:$count_lo_out, eDC:$count_hi_out),
         (ins eP:$ptr, eDS:$mod),
         "lda.3d", "$mLdaScl, [$ptr], $mod">,
       AIE2_ag_all__ag_pstm_3d;
     }
+  }
 
+  let Itinerary = II_LDA_POST_3D_R, Constraints = "$ptr = $ptr_out" in {
     let DecoderMethod = "DecodeLDA_3D_HBInstruction" in {
 
       def LDA_3D_S8_dmhb_lda : AIE2_dmhb_lda_inst_lda<0b00,
@@ -430,9 +461,9 @@ let Itinerary = II_JZ, hasDelaySlot = true in {
 }
 
 let Itinerary = II_MOVA, isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
-  let ItineraryRegPairs = [ItinRegClassPair<II_MOVA_R,eR>, ItinRegClassPair<II_MOVA_P,eP>, 
-                           ItinRegClassPair<II_MOVA_M,eM>, ItinRegClassPair<II_MOVA_DC,eDC>,
-                           ItinRegClassPair<II_MOVA_DJ,eDJ>, ItinRegClassPair<II_MOVA_DN,eDN>] in {  
+  let ItineraryRegPairs = [ItinRegClassPair<II_MOVA_R,[OperandRegClass<0, eR>]>, ItinRegClassPair<II_MOVA_P,[OperandRegClass<0, eP>]>, 
+                           ItinRegClassPair<II_MOVA_M,[OperandRegClass<0, eM>]>, ItinRegClassPair<II_MOVA_DC,[OperandRegClass<0, eDC>]>,
+                           ItinRegClassPair<II_MOVA_DJ,[OperandRegClass<0, eDJ>]>, ItinRegClassPair<II_MOVA_DN,[OperandRegClass<0, eDN>]>] in {  
     def MOVA_lda_cg : AIE2_lda_cg_inst_lda<(outs OP_mLdaCg:$mLdaCg),
         (ins simm11:$c11s), "mova", "$mLdaCg, $c11s">;
   }
@@ -538,10 +569,10 @@ let Itinerary = II_PADD_3D in {
 
 // MOV & MOVXM instruction have identical itineraries, they differ only in slot usage 
 let Itinerary = II_MOV, isMoveImm = 1, isReMaterializable = 1 in {
-  let ItineraryRegPairs = [ItinRegClassPair<II_MOV_RS,eR>, ItinRegClassPair<II_MOV_P,eP>, 
-                          ItinRegClassPair<II_MOV_M,eM>, ItinRegClassPair<II_MOV_RS,eS>,
-                          ItinRegClassPair<II_MOV_DC,eDC>, ItinRegClassPair<II_MOV_DJ,eDJ>,
-                          ItinRegClassPair<II_MOV_DN,eDN>] in {
+  let ItineraryRegPairs = [ItinRegClassPair<II_MOV_RS,[OperandRegClass<0, eR>]>, ItinRegClassPair<II_MOV_P,[OperandRegClass<0, eP>]>, 
+                          ItinRegClassPair<II_MOV_M,[OperandRegClass<0, eM>]>, ItinRegClassPair<II_MOV_RS,[OperandRegClass<0, eS>]>,
+                          ItinRegClassPair<II_MOV_DC,[OperandRegClass<0, eDC>]>, ItinRegClassPair<II_MOV_DJ,[OperandRegClass<0, eDJ>]>,
+                          ItinRegClassPair<II_MOV_DN,[OperandRegClass<0, eDN>]>] in {
     // MOVXM is quite expensive in code size, and will block an extra slot, so we don't
     // mark it as isAsCheapAsAMove
     let isAsCheapAsAMove = 0 in {
@@ -556,10 +587,10 @@ let Itinerary = II_MOV, isMoveImm = 1, isReMaterializable = 1 in {
 }
 
 let Itinerary = II_MOV_SCL, isMoveReg = 1 in {
-  let ItineraryRegPairs = [ItinRegClassPair<II_MOV_SCL_RS,eR>, ItinRegClassPair<II_MOV_SCL_P,eP>, 
-                           ItinRegClassPair<II_MOV_SCL_M,eM>, ItinRegClassPair<II_MOV_SCL_RS,eS>,
-                           ItinRegClassPair<II_MOV_SCL_DC,eDC>, ItinRegClassPair<II_MOV_SCL_DJ,eDJ>,
-                           ItinRegClassPair<II_MOV_SCL_DN,eDN>] in {
+  let ItineraryRegPairs = [ItinRegClassPair<II_MOV_SCL_RS,[OperandRegClass<0, eR>]>, ItinRegClassPair<II_MOV_SCL_P,[OperandRegClass<0, eP>]>, 
+                           ItinRegClassPair<II_MOV_SCL_M,[OperandRegClass<0, eM>]>, ItinRegClassPair<II_MOV_SCL_RS,[OperandRegClass<0, eS>]>,
+                           ItinRegClassPair<II_MOV_SCL_DC,[OperandRegClass<0, eDC>]>, ItinRegClassPair<II_MOV_SCL_DJ,[OperandRegClass<0, eDJ>]>,
+                           ItinRegClassPair<II_MOV_SCL_DN,[OperandRegClass<0, eDN>]>] in {
     def MOV_mv_scl : AIE2_mv_scl_inst_mv<(outs OP_mMvSclDst:$mMvSclDst), 
         (ins OP_mMvSclSrc:$mMvSclSrc), "mov", "$mMvSclDst, $mMvSclSrc">;
   }
