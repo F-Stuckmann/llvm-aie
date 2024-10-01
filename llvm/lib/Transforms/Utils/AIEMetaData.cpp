@@ -30,37 +30,24 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
   std::optional<int> MinIterCount = getMinIterCounts(&L);
   // since we assume that t
 
+  // dump loop summary
+  LLVM_DEBUG(dbgs() << "Preheader:");
   if (L.getLoopPreheader())
-    LLVM_DEBUG(dbgs() << "Found Preheader: " << L.getLoopPreheader()->getName()
-                      << "\n");
-  LLVM_DEBUG(dbgs() << "Preheader conditional check:"
-                    << cast<BranchInst>(L.getLoopPreheader()->getTerminator())
-                           ->isConditional()
-                    << "\n");
-  if (cast<BranchInst>(L.getLoopPreheader()->getTerminator())->isConditional())
-    LLVM_DEBUG(dbgs() << "Terminator Condition :";
-               cast<BranchInst>(L.getLoopPreheader()->getTerminator())
-                   ->getCondition()
-                   ->dump();
-               dbgs() << "\n");
+    LLVM_DEBUG(dbgs() << L.getLoopPreheader()->getName());
+  LLVM_DEBUG(dbgs() << "\nHeader:");
+  if (L.getHeader())
+    LLVM_DEBUG(dbgs() << L.getHeader()->getName());
+  LLVM_DEBUG(dbgs() << "\n");
 
   if (MinIterCount.has_value()) {
-    LLVM_DEBUG(dbgs() << "Processing Loop Metadata of " << L.getName() << "\n");
+    LLVM_DEBUG(dbgs() << "Processing Loop Metadata of "
+                      << L.getHeader()->getParent()->getName() << " "
+                      << L.getName() << " (" << MinIterCount.value() << ")\n");
     addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value(), Context);
   }
 
-  LLVM_DEBUG(dbgs() << "Preheader conditional check:"
-                    << cast<BranchInst>(L.getLoopPreheader()->getTerminator())
-                           ->isConditional()
-                    << "\n");
-  if (cast<BranchInst>(L.getLoopPreheader()->getTerminator())->isConditional())
-    LLVM_DEBUG(dbgs() << "Terminator Condition :";
-               cast<BranchInst>(L.getLoopPreheader()->getTerminator())
-                   ->getCondition()
-                   ->dump();
-               dbgs() << "\n");
-
-  LLVM_DEBUG(dbgs() << "Dumping Full Function:\n";
+  LLVM_DEBUG(dbgs() << "Dumping Full Function:"
+                    << L.getHeader()->getParent()->getName() << "\n";
              L.getHeader()->getParent()->dump(););
   return PreservedAnalyses::all();
 }
