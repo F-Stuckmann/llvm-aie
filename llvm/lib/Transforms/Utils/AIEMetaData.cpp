@@ -124,28 +124,8 @@ Value *getIterationVariable(const SCEV *S) {
 }
 
 Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
-  // Get the loop exiting block and condition
-  BasicBlock *ExitingBlock = L.getExitingBlock();
-  if (!ExitingBlock) {
-    assert(false && "Failed to find the exiting block.\n");
-    return nullptr;
-  }
 
-  Value *LoopCounter;
-  for (uint I = 0; I < InductionPHI->getNumIncomingValues(); I++) {
-    if (InductionPHI->getIncomingBlock(I) == ExitingBlock) {
-      LoopCounter = InductionPHI->getOperand(I);
-    }
-  }
-  if (!LoopCounter) {
-    LLVM_DEBUG(dbgs() << "Could not extract LoopCounter Variable from ";
-               InductionPHI->dump(););
-    return nullptr;
-  }
-
-  // verify that it is in the comparison!
-
-  BranchInst *BI = dyn_cast<BranchInst>(ExitingBlock->getTerminator());
+  BranchInst *BI = dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator());
   if (!BI || !BI->isConditional()) {
     assert(false && "Exiting block does not have a conditional branch.\n");
   }
@@ -199,13 +179,16 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
     if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S)) {
       if (AR->getLoop() == &L) {
-        LLVM_DEBUG(dbgs() << "Found Induction Phi "; S->dump());
+        LLVM_DEBUG(dbgs() << "Found SCEV "; S->dump());
         InductionPHI = &PN;
         break;
       }
     }
     LLVM_DEBUG(dbgs() << "Phi "; S->dump());
   }
+  LLVM_DEBUG(dbgs() << "          Induction Variable "; InductionPHI->dump(););
+  LLVM_DEBUG(dbgs() << "Canonical Induction Variable ";
+             L.getCanonicalInductionVariable()->dump(););
 
   Value *MinValue = calcMinValue(S, MinIterCount, Context);
   if (!MinValue) {
@@ -220,6 +203,8 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   }
 
   if (!IterVar) {
+    // if everything fails, the latch and exit may be in the same basic block
+    // in this form, I can finally call InductionVariable and not get a nullptr
     IterVar = L.getInductionVariable(SE);
     if (!IterVar) {
       LLVM_DEBUG(
@@ -227,6 +212,13 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
           << "Could not find Iteration Variable. Will not process Metadata\n");
       return;
     }
+  }
+
+  if (isa<Constant>(IterVar)) {
+    LLVM_DEBUG(dbgs() << "Iteration Variable (Max value) is an integer and "
+                         "therefore no assumption "
+                         "has to be added!");
+    return;
   }
 
   LLVM_DEBUG(dbgs() << "Minimum Value : "; MinValue->dump());
