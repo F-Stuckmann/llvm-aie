@@ -225,22 +225,25 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   // if Limit Instruction is not in the preheader, add it so that the assertion
   // has a defined start point.
-  Instruction *LimitInstruction = dyn_cast<Instruction>(MaxBoundry);
-  if (LimitInstruction->getParent() != Preheader &&
-      !DT.dominates(LimitInstruction->getParent(), Preheader)) {
-    if (dyn_cast<BranchInst>(Preheader->getTerminator())->isUnconditional() &&
-        L.hasLoopInvariantOperands(LimitInstruction)) {
-      assert(LimitInstruction->isSafeToRemove());
-      LLVM_DEBUG(dbgs() << "Moving Max Value (" << LimitInstruction
-                        << ") to Preheader: " << Preheader->getName() << "\n");
-      // what happens if the uses are defined in the BB?
-      LimitInstruction->moveBefore(Preheader->getTerminator());
-    } else {
-      LLVM_DEBUG(
-          dbgs() << "AIEMetadata-Warning: cannot hoist LimitInstruciton to "
-                    "Preheader, will abort \n");
+  if (isa<Instruction>(MaxBoundry)) {
+    Instruction *LimitInstruction = dyn_cast<Instruction>(MaxBoundry);
+    if (LimitInstruction->getParent() != Preheader &&
+        !DT.dominates(LimitInstruction->getParent(), Preheader)) {
+      if (dyn_cast<BranchInst>(Preheader->getTerminator())->isUnconditional() &&
+          L.hasLoopInvariantOperands(LimitInstruction)) {
+        assert(LimitInstruction->isSafeToRemove());
+        LLVM_DEBUG(dbgs() << "Moving Max Value (" << LimitInstruction
+                          << ") to Preheader: " << Preheader->getName()
+                          << "\n");
+        // what happens if the uses are defined in the BB?
+        LimitInstruction->moveBefore(Preheader->getTerminator());
+      } else {
+        LLVM_DEBUG(
+            dbgs() << "AIEMetadata-Warning: cannot hoist LimitInstruciton to "
+                      "Preheader, will abort \n");
 
-      return;
+        return;
+      }
     }
   }
 
