@@ -43,6 +43,7 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
     LLVM_DEBUG(dbgs() << "Processing Loop Metadata of "
                       << L.getHeader()->getParent()->getName() << " "
                       << L.getName() << " (" << MinIterCount.value() << ")\n");
+    LLVM_DEBUG(L.getHeader()->getParent()->dump(););
     addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value(), Context);
   }
 
@@ -187,34 +188,26 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
     LLVM_DEBUG(dbgs() << "Phi "; S->dump());
   }
   LLVM_DEBUG(dbgs() << "          Induction Variable "; InductionPHI->dump(););
-  LLVM_DEBUG(dbgs() << "Canonical Induction Variable ";
-             L.getCanonicalInductionVariable()->dump(););
 
   Value *MinValue = calcMinValue(S, MinIterCount, Context);
   if (!MinValue) {
     return;
   }
 
-  Value *IterVar = nullptr;
+  Value *MaxBoundry = nullptr;
   if (isIncrement(S)) {
-    IterVar = getIterationVariable(L, InductionPHI);
+    MaxBoundry = getIterationVariable(L, InductionPHI);
   } else {
-    IterVar = getIterationVariable(S);
+    MaxBoundry = getIterationVariable(S);
   }
 
-  if (!IterVar) {
-    // if everything fails, the latch and exit may be in the same basic block
-    // in this form, I can finally call InductionVariable and not get a nullptr
-    IterVar = L.getInductionVariable(SE);
-    if (!IterVar) {
-      LLVM_DEBUG(
-          dbgs()
-          << "Could not find Iteration Variable. Will not process Metadata\n");
-      return;
-    }
+  if (!MaxBoundry) {
+    LLVM_DEBUG(dbgs() << "AIEMetadata-Warning: Could not find Iteration "
+                         "Variable. Will not process Metadata\n");
+    return;
   }
 
-  if (isa<Constant>(IterVar)) {
+  if (isa<Constant>(MaxBoundry)) {
     LLVM_DEBUG(dbgs() << "Iteration Variable (Max value) is an integer and "
                          "therefore no assumption "
                          "has to be added!");
@@ -222,11 +215,32 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   }
 
   LLVM_DEBUG(dbgs() << "Minimum Value : "; MinValue->dump());
-  LLVM_DEBUG(dbgs() << "Iteration Variable : "; IterVar->dump());
+  LLVM_DEBUG(dbgs() << "Max Value : "; MaxBoundry->dump());
 
   IRBuilder<> Builder(Preheader->getTerminator());
+
+  // if Limit Instruction is not in the preheader, add it so that the assertion
+  // has a defined start point.
+  Instruction *LimitInstruction = dyn_cast<Instruction>(MaxBoundry);
+  if (LimitInstruction->getParent() != Preheader) {
+    if (dyn_cast<BranchInst>(Preheader->getTerminator())->isUnconditional() &&
+        L.hasLoopInvariantOperands(LimitInstruction)) {
+      assert(LimitInstruction->isSafeToRemove());
+      LLVM_DEBUG(dbgs() << "Moving Max Value (" << LimitInstruction
+                        << ") to Preheader: " << Preheader->getName() << "\n");
+      // what happens if the uses are defined in the BB?
+      LimitInstruction->moveBefore(Preheader->getTerminator());
+    } else {
+      LLVM_DEBUG(
+          dbgs() << "AIEMetadata-Warning: cannot hoist LimitInstruciton to "
+                    "Preheader, will abort \n");
+
+      return;
+    }
+  }
+
   Value *Cmp = nullptr;
-  Cmp = Builder.CreateICmpSGT(IterVar, MinValue);
+  Cmp = Builder.CreateICmpSGT(MaxBoundry, MinValue);
 
   LLVM_DEBUG(dbgs() << "Inserting Condition:"; MinValue->dump();
              dbgs() << "With Comparator:"; Cmp->dump());
