@@ -11,6 +11,7 @@
 
 #include "llvm/Transforms/Utils/AIEMetaData.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
@@ -19,13 +20,15 @@
 using namespace llvm;
 
 void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
-                              uint64_t MinIterCount, LLVMContext *Context);
+                              uint64_t MinIterCount, const DominatorTree &DT,
+                              LLVMContext *Context);
 
 PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                                    LoopStandardAnalysisResults &AR,
                                    LPMUpdater &U) {
   Context = &L.getHeader()->getParent()->getContext();
   ScalarEvolution &SE = AR.SE;
+  DominatorTree DT = DominatorTree(*L.getHeader()->getParent());
 
   std::optional<int> MinIterCount = getMinIterCounts(&L);
   // since we assume that t
@@ -44,7 +47,7 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                       << L.getHeader()->getParent()->getName() << " "
                       << L.getName() << " (" << MinIterCount.value() << ")\n");
     LLVM_DEBUG(L.getHeader()->getParent()->dump(););
-    addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value(), Context);
+    addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value(), DT, Context);
   }
 
   LLVM_DEBUG(dbgs() << "Dumping Full Function:"
@@ -158,7 +161,8 @@ Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
 
 // Function to add an assume in the loop preheader
 void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
-                              uint64_t MinIterCount, LLVMContext *Context) {
+                              uint64_t MinIterCount, const DominatorTree &DT,
+                              LLVMContext *Context) {
   // Retrieve the Loop Preheader
   BasicBlock *Preheader = L.getLoopPreheader();
   if (!Preheader) {
@@ -222,7 +226,8 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   // if Limit Instruction is not in the preheader, add it so that the assertion
   // has a defined start point.
   Instruction *LimitInstruction = dyn_cast<Instruction>(MaxBoundry);
-  if (LimitInstruction->getParent() != Preheader) {
+  if (LimitInstruction->getParent() != Preheader &&
+      !DT.dominates(LimitInstruction->getParent(), Preheader)) {
     if (dyn_cast<BranchInst>(Preheader->getTerminator())->isUnconditional() &&
         L.hasLoopInvariantOperands(LimitInstruction)) {
       assert(LimitInstruction->isSafeToRemove());
