@@ -256,6 +256,14 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   }
 
   Value *Cmp = nullptr;
+  if (MaxBoundry->getType() != MinValue->getType()) {
+    if (MinValue->getType()->getScalarSizeInBits() <
+        MaxBoundry->getType()->getScalarSizeInBits()) {
+      MinValue = Builder.CreateSExt(MinValue, MaxBoundry->getType());
+    } else {
+      MaxBoundry = Builder.CreateSExt(MaxBoundry, MinValue->getType());
+    }
+  }
   Cmp = Builder.CreateICmpSGT(MaxBoundry, MinValue);
 
   LLVM_DEBUG(dbgs() << "Inserting Condition:"; MinValue->dump();
