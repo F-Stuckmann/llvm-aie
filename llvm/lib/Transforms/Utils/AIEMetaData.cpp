@@ -31,6 +31,7 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
   DominatorTree DT = DominatorTree(*L.getHeader()->getParent());
 
   std::optional<int> MinIterCount = getMinIterCounts(&L);
+
   // since we assume that t
 
   // dump loop summary
@@ -47,7 +48,12 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                       << L.getHeader()->getParent()->getName() << " "
                       << L.getName() << " (" << MinIterCount.value() << ")\n");
     LLVM_DEBUG(L.getHeader()->getParent()->dump(););
-    addAssumeToLoopPreheader(L, SE, AR.AC, MinIterCount.value(), DT, Context);
+
+    int IterCount = MinIterCount.value();
+    // std::optional<int> UnrollCount = getUnrollCount(&L);
+    // if (UnrollCount.has_value() && UnrollCount.value() > IterCount)
+    //   IterCount = UnrollCount.value();
+    addAssumeToLoopPreheader(L, SE, AR.AC, IterCount, DT, Context);
   }
 
   LLVM_DEBUG(dbgs() << "Dumping Full Function:"
@@ -127,7 +133,7 @@ Value *getIterationVariable(const SCEV *S) {
   }
 }
 
-Value *getIterationVariable(const Loop &L, const PHINode *InductionPHI) {
+Value *getIterationVariable(const Loop &L) {
 
   BranchInst *BI = dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator());
   if (!BI || !BI->isConditional()) {
@@ -172,26 +178,28 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   Module *M = Preheader->getModule();
 
-  // Identify the Loop Induction Variable and Limit
-  PHINode *InductionPHI = nullptr;
-
   // Find the canonical induction variable
-  const SCEV *S;
+  const SCEV *S = nullptr;
   for (PHINode &PN : L.getHeader()->phis()) {
     if (!SE.isSCEVable(PN.getType()))
       continue;
-    S = SE.getSCEV(&PN);
+    const SCEV *SIntern = SE.getSCEV(&PN);
 
-    if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S)) {
+    if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SIntern)) {
       if (AR->getLoop() == &L) {
-        LLVM_DEBUG(dbgs() << "Found SCEV "; S->dump());
-        InductionPHI = &PN;
+        LLVM_DEBUG(dbgs() << "Found SCEV "; SIntern->dump());
+        S = SIntern;
         break;
       }
     }
-    LLVM_DEBUG(dbgs() << "Phi "; S->dump());
+    LLVM_DEBUG(dbgs() << "Phi "; SIntern->dump());
   }
-  LLVM_DEBUG(dbgs() << "          Induction Variable "; InductionPHI->dump(););
+
+  if (!S) {
+    LLVM_DEBUG(dbgs() << "AIEMetadata-Warning: Could not extract "
+                         "SCEVAddRecExpr! Will not process Metadata\n");
+    return;
+  }
 
   Value *MinValue = calcMinValue(S, MinIterCount, Context);
   if (!MinValue) {
@@ -200,7 +208,7 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   Value *MaxBoundry = nullptr;
   if (isIncrement(S)) {
-    MaxBoundry = getIterationVariable(L, InductionPHI);
+    MaxBoundry = getIterationVariable(L);
   } else {
     MaxBoundry = getIterationVariable(S);
   }
