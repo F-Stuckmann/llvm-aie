@@ -13,21 +13,20 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Transforms/Scalar/IndVarSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
 #define DEBUG_TYPE "aie-metadata"
 
 using namespace llvm;
 
-void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
-                              uint64_t MinIterCount, const DominatorTree &DT,
-                              LLVMContext *Context);
-
 PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                                    LoopStandardAnalysisResults &AR,
                                    LPMUpdater &U) {
   Context = &L.getHeader()->getParent()->getContext();
-  ScalarEvolution &SE = AR.SE;
+  this->L = &L;
+  SE = &AR.SE;
+  AC = &AR.AC;
   DominatorTree DT = DominatorTree(*L.getHeader()->getParent());
 
   std::optional<int> MinIterCount = getMinIterCounts(&L);
@@ -43,17 +42,13 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
     LLVM_DEBUG(dbgs() << L.getHeader()->getName());
   LLVM_DEBUG(dbgs() << "\n");
 
-  if (MinIterCount.has_value()) {
+  if (MinIterCount.has_value() && MinIterCount.value() > 0) {
     LLVM_DEBUG(dbgs() << "Processing Loop Metadata of "
                       << L.getHeader()->getParent()->getName() << " "
                       << L.getName() << " (" << MinIterCount.value() << ")\n");
     LLVM_DEBUG(L.getHeader()->getParent()->dump(););
 
-    int IterCount = MinIterCount.value();
-    // std::optional<int> UnrollCount = getUnrollCount(&L);
-    // if (UnrollCount.has_value() && UnrollCount.value() > IterCount)
-    //   IterCount = UnrollCount.value();
-    addAssumeToLoopPreheader(L, SE, AR.AC, IterCount, DT, Context);
+    addAssumeToLoopPreheader(MinIterCount.value(), DT, Context);
   }
 
   LLVM_DEBUG(dbgs() << "Dumping Full Function:"
@@ -116,7 +111,7 @@ Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context) {
   return static_cast<llvm::Value *>(ConstIncValue);
 }
 
-Value *getMaxBoundry(const SCEV *S) {
+Value *getMaxBoundryDec(const SCEV *S) {
   switch (S->getSCEVType()) {
   case scAddRecExpr: {
     const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
@@ -133,9 +128,9 @@ Value *getMaxBoundry(const SCEV *S) {
   }
 }
 
-Value *getMaxBoundry(const Loop &L) {
+Value *AIEMetaData::getMaxBoundry() const {
 
-  BranchInst *BI = dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator());
+  BranchInst *BI = dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator());
   if (!BI || !BI->isConditional()) {
     assert(false && "Exiting block does not have a conditional branch.\n");
   }
@@ -157,7 +152,7 @@ Value *getMaxBoundry(const Loop &L) {
   if (!InductionVar) {
     LLVM_DEBUG(
         dbgs() << "Induction variable not found in loop exit condition.\n";
-        L.getHeader()->dump(); dbgs() << "\n"; BI->dump());
+        L->getHeader()->dump(); dbgs() << "\n"; BI->dump());
     return nullptr; // assert(false && "Induction variable not found in loop
                     // exit condition.\n");
   }
@@ -165,12 +160,84 @@ Value *getMaxBoundry(const Loop &L) {
   return InductionVar;
 }
 
+const SCEV *AIEMetaData::getTruncInductionSCEV() const {
+  const SCEV *S = nullptr;
+
+  for (BasicBlock *BB : L->blocks()) {
+    for (BasicBlock::iterator IT = BB->begin(), IE = BB->end(); IT != IE;
+         ++IT) {
+      Instruction *I = &(*IT);
+      if (!SE->isSCEVable(I->getType()))
+        continue;
+      LLVM_DEBUG(I->dump());
+
+      // remove all instructions that are not relevant for branch decision
+      bool ValidInstruction = false;
+      for (int Index = 0; Index < I->getNumOperands(); Index++) {
+        if (I->getOperand(Index) == LoopBound0 ||
+            I->getOperand(Index) == LoopBound1)
+          ValidInstruction = true;
+      }
+      if (!ValidInstruction)
+        continue;
+
+      const SCEV *SIntern = SE->getSCEV(I);
+      LLVM_DEBUG(dbgs() << "SCEV "; SIntern->dump());
+      LLVM_DEBUG(dbgs() << SIntern->getSCEVType() << "\n");
+
+      if (const SCEVAddExpr *AR = dyn_cast<SCEVAddExpr>(SIntern)) {
+        if (const SCEVZeroExtendExpr *Zext =
+                dyn_cast<SCEVZeroExtendExpr>(AR->getOperand(1))) {
+          if (const SCEVTruncateExpr *Trunc =
+                  dyn_cast<SCEVTruncateExpr>(Zext->getOperand(0))) {
+            const SCEV *OrigSCEV = Trunc->getOperand();
+
+            if (const SCEVConstant *SCEVConst =
+                    dyn_cast<SCEVConstant>(AR->getOperand(0))) {
+              const SCEV *Step =
+                  SE->getConstant(OrigSCEV->getType(),
+                                  SCEVConst->getValue()->getSExtValue(), true);
+
+              // extract start point from phi of the SCEV
+              const SCEV *Start = nullptr;
+              Value *StartVal = dyn_cast<SCEVUnknown>(OrigSCEV)->getValue();
+              if (StartVal) {
+                PHINode *PN =
+                    dyn_cast<PHINode>(dyn_cast<Instruction>(StartVal));
+                if (PN) {
+                  for (int Op = 0; Op < PN->getNumOperands(); Op++) {
+                    if (PN->getIncomingBlock(Op) == L->getLoopPreheader()) {
+                      Value *V = PN->getOperand(Op);
+                      if (isa<Constant>(V)) {
+                        Start = SE->getSCEV(V);
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (!Start)
+                continue;
+
+              S = SE->getAddRecExpr(
+                  Start, Step, L, llvm::SCEVAddExpr::NoWrapFlags::FlagAnyWrap);
+              LLVM_DEBUG(dbgs() << "Found SCEV "; S->dump());
+              return S;
+            }
+          }
+        }
+      }
+    }
+  }
+  return S;
+}
+
 // Function to add an assume in the loop preheader
-void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
-                              uint64_t MinIterCount, const DominatorTree &DT,
-                              LLVMContext *Context) {
+void AIEMetaData::addAssumeToLoopPreheader(uint64_t MinIterCount,
+                                           const DominatorTree &DT,
+                                           LLVMContext *Context) {
   // Retrieve the Loop Preheader
-  BasicBlock *Preheader = L.getLoopPreheader();
+  BasicBlock *Preheader = L->getLoopPreheader();
   if (!Preheader) {
     errs() << "Loop does not have a preheader.\n";
     return;
@@ -178,37 +245,19 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   Module *M = Preheader->getModule();
 
-  dyn_cast<ICmpInst>(dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
-                         ->getCondition())
-      ->dump();
-  LLVM_DEBUG(
-      dbgs() << "Num operands: "
-             << dyn_cast<ICmpInst>(
-                    dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
-                        ->getCondition())
-                    ->getNumOperands()
-             << "\n");
-  Instruction *Op1 = dyn_cast<Instruction>(
-      dyn_cast<ICmpInst>(
-          dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
-              ->getCondition())
-          ->getOperand(0));
-  Op1->dump();
-  Instruction *Op2 = dyn_cast<Instruction>(
-      dyn_cast<ICmpInst>(
-          dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
-              ->getCondition())
-          ->getOperand(1));
-  if (Op2)
-    Op2->dump();
+  ICmpInst *CombInstr = dyn_cast<ICmpInst>(
+      dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator())
+          ->getCondition());
+  LoopBound0 = dyn_cast<Instruction>(CombInstr->getOperand(0));
+  LoopBound1 = dyn_cast<Instruction>(CombInstr->getOperand(1));
 
   // Find the canonical induction variable
   const SCEV *S = nullptr;
-  for (PHINode &PN : L.getHeader()->phis()) {
-    if (!SE.isSCEVable(PN.getType()))
+  for (PHINode &PN : L->getHeader()->phis()) {
+    if (!SE->isSCEVable(PN.getType()))
       continue;
     LLVM_DEBUG(dbgs() << "Phi: "; PN.dump(););
-    const SCEV *SIntern = SE.getSCEV(&PN);
+    const SCEV *SIntern = SE->getSCEV(&PN);
 
     for (int i = 0; i < PN.getNumOperands(); i++) {
       PN.getOperand(i)->dump();
@@ -216,13 +265,17 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
     InductionDescriptor ID;
     if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SIntern)) {
-      if (AR->getLoop() == &L && (&PN == Op1 || &PN == Op2)) {
+      if (AR->getLoop() == L && (&PN == LoopBound0 || &PN == LoopBound1)) {
         LLVM_DEBUG(dbgs() << "Found SCEV "; SIntern->dump());
         S = SIntern;
         break;
       }
     }
     LLVM_DEBUG(dbgs() << "SCEV "; SIntern->dump());
+  }
+
+  if (!S) {
+    S = getTruncInductionSCEV();
   }
 
   if (!S) {
@@ -238,9 +291,9 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   Value *MaxBoundry = nullptr;
   if (isIncrement(S)) {
-    MaxBoundry = getMaxBoundry(L);
+    MaxBoundry = getMaxBoundry();
   } else {
-    MaxBoundry = getMaxBoundry(S);
+    MaxBoundry = getMaxBoundryDec(S);
   }
 
   if (!MaxBoundry) {
@@ -261,14 +314,14 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   IRBuilder<> Builder(Preheader->getTerminator());
 
-  // if Limit Instruction is not in the preheader, add it so that the assertion
-  // has a defined start point.
+  // if Limit Instruction is not in the preheader, add it so that the
+  // assertion has a defined start point.
   if (isa<Instruction>(MaxBoundry)) {
     Instruction *LimitInstruction = dyn_cast<Instruction>(MaxBoundry);
     if (LimitInstruction->getParent() != Preheader &&
         !DT.dominates(LimitInstruction->getParent(), Preheader)) {
       if (dyn_cast<BranchInst>(Preheader->getTerminator())->isUnconditional() &&
-          L.hasLoopInvariantOperands(LimitInstruction)) {
+          L->hasLoopInvariantOperands(LimitInstruction)) {
         assert(LimitInstruction->isSafeToRemove());
         LLVM_DEBUG(dbgs() << "Moving Max Value (" << LimitInstruction
                           << ") to Preheader: " << Preheader->getName()
@@ -303,5 +356,5 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
   Function *AssumeFn = Intrinsic::getDeclaration(M, Intrinsic::assume);
   CallInst *Call = Builder.CreateCall(AssumeFn, Cmp);
   Call->setTailCall(true);
-  AC.registerAssumption(dyn_cast<AssumeInst>(Call));
+  AC->registerAssumption(dyn_cast<AssumeInst>(Call));
 }

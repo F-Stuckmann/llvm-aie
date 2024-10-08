@@ -24,6 +24,17 @@ class Loop;
 class AIEMetaData : public PassInfoMixin<AIEMetaData> {
 private:
   LLVMContext *Context;
+  ScalarEvolution *SE;
+  AssumptionCache *AC;
+  const Loop *L;
+  Instruction *LoopBound0;
+  Instruction *LoopBound1;
+
+  const SCEV *getTruncInductionSCEV() const;
+  void addAssumeToLoopPreheader(uint64_t MinIterCount, const DominatorTree &DT,
+                                LLVMContext *Context);
+
+  Value *getMaxBoundry() const;
 
 public:
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
