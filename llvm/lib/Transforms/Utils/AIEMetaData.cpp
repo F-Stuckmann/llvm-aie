@@ -57,24 +57,27 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
   return PreservedAnalyses::all();
 }
 
-bool isIncrement(const SCEV *S) {
+bool AIEMetaData::isIncrement(const SCEV *S) {
   switch (S->getSCEVType()) {
   case scAddRecExpr: {
     const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
     assert(AR->getNumOperands() == 2 &&
            "Unknown Handling of more than 2 Operands");
-    return cast<SCEVConstant>(*AR->getOperand(1)).getValue()->getSExtValue() >
-           0;
+    Increment =
+        cast<SCEVConstant>(*AR->getOperand(1)).getValue()->getSExtValue() > 0;
+    return Increment;
     break;
   }
 
   default:
     assert(false && "Could not extract Iteration Variable from ");
   }
-  return false;
+  Increment = false;
+  return Increment;
 }
 
-Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context) {
+Value *AIEMetaData::calcMinValue(const SCEV *S, int MinIterCount,
+                                 LLVMContext *Context) {
   // get start point
 
   // increment it by
@@ -102,9 +105,10 @@ Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context) {
     assert(false && "Could not extract Iteration Variable from ");
   }
 
-  int MaxValue = abs(IncValue * MinIterCount);
+  int MaxValue = std::abs(IncValue * MinIterCount);
   // SGT is used to compare, so I must subtract 1
-  MaxValue--;
+  if (Increment)
+    MaxValue--;
 
   llvm::ConstantInt *ConstIncValue =
       llvm::ConstantInt::get(llvm::Type::getInt32Ty(*Context), MaxValue, true);
@@ -173,7 +177,7 @@ const SCEV *AIEMetaData::getTruncInductionSCEV() const {
 
       // remove all instructions that are not relevant for branch decision
       bool ValidInstruction = false;
-      for (int Index = 0; Index < I->getNumOperands(); Index++) {
+      for (uint Index = 0; Index < I->getNumOperands(); Index++) {
         if (I->getOperand(Index) == LoopBound0 ||
             I->getOperand(Index) == LoopBound1)
           ValidInstruction = true;
@@ -205,7 +209,7 @@ const SCEV *AIEMetaData::getTruncInductionSCEV() const {
                 PHINode *PN =
                     dyn_cast<PHINode>(dyn_cast<Instruction>(StartVal));
                 if (PN) {
-                  for (int Op = 0; Op < PN->getNumOperands(); Op++) {
+                  for (uint Op = 0; Op < PN->getNumOperands(); Op++) {
                     if (PN->getIncomingBlock(Op) == L->getLoopPreheader()) {
                       Value *V = PN->getOperand(Op);
                       if (isa<Constant>(V)) {
@@ -259,7 +263,7 @@ void AIEMetaData::addAssumeToLoopPreheader(uint64_t MinIterCount,
     LLVM_DEBUG(dbgs() << "Phi: "; PN.dump(););
     const SCEV *SIntern = SE->getSCEV(&PN);
 
-    for (int i = 0; i < PN.getNumOperands(); i++) {
+    for (uint i = 0; i < PN.getNumOperands(); i++) {
       PN.getOperand(i)->dump();
     }
 
@@ -283,14 +287,14 @@ void AIEMetaData::addAssumeToLoopPreheader(uint64_t MinIterCount,
                          "SCEVAddRecExpr! Will not process Metadata\n");
     return;
   }
-
+  isIncrement(S);
   Value *MinValue = calcMinValue(S, MinIterCount, Context);
   if (!MinValue) {
     return;
   }
 
   Value *MaxBoundry = nullptr;
-  if (isIncrement(S)) {
+  if (Increment) {
     MaxBoundry = getMaxBoundry();
   } else {
     MaxBoundry = getMaxBoundryDec(S);
