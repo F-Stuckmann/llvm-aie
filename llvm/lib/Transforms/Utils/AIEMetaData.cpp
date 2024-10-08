@@ -178,21 +178,51 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   Module *M = Preheader->getModule();
 
+  dyn_cast<ICmpInst>(dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
+                         ->getCondition())
+      ->dump();
+  LLVM_DEBUG(
+      dbgs() << "Num operands: "
+             << dyn_cast<ICmpInst>(
+                    dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
+                        ->getCondition())
+                    ->getNumOperands()
+             << "\n");
+  Instruction *Op1 = dyn_cast<Instruction>(
+      dyn_cast<ICmpInst>(
+          dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
+              ->getCondition())
+          ->getOperand(0));
+  Op1->dump();
+  Instruction *Op2 = dyn_cast<Instruction>(
+      dyn_cast<ICmpInst>(
+          dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator())
+              ->getCondition())
+          ->getOperand(1));
+  if (Op2)
+    Op2->dump();
+
   // Find the canonical induction variable
   const SCEV *S = nullptr;
   for (PHINode &PN : L.getHeader()->phis()) {
     if (!SE.isSCEVable(PN.getType()))
       continue;
+    LLVM_DEBUG(dbgs() << "Phi: "; PN.dump(););
     const SCEV *SIntern = SE.getSCEV(&PN);
 
+    for (int i = 0; i < PN.getNumOperands(); i++) {
+      PN.getOperand(i)->dump();
+    }
+
+    InductionDescriptor ID;
     if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SIntern)) {
-      if (AR->getLoop() == &L) {
+      if (AR->getLoop() == &L && (&PN == Op1 || &PN == Op2)) {
         LLVM_DEBUG(dbgs() << "Found SCEV "; SIntern->dump());
         S = SIntern;
         break;
       }
     }
-    LLVM_DEBUG(dbgs() << "Phi "; SIntern->dump());
+    LLVM_DEBUG(dbgs() << "SCEV "; SIntern->dump());
   }
 
   if (!S) {
