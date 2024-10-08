@@ -116,7 +116,7 @@ Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context) {
   return static_cast<llvm::Value *>(ConstIncValue);
 }
 
-Value *getIterationVariable(const SCEV *S) {
+Value *getMaxBoundry(const SCEV *S) {
   switch (S->getSCEVType()) {
   case scAddRecExpr: {
     const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
@@ -133,7 +133,7 @@ Value *getIterationVariable(const SCEV *S) {
   }
 }
 
-Value *getIterationVariable(const Loop &L) {
+Value *getMaxBoundry(const Loop &L) {
 
   BranchInst *BI = dyn_cast<BranchInst>(L.getExitingBlock()->getTerminator());
   if (!BI || !BI->isConditional()) {
@@ -208,9 +208,9 @@ void addAssumeToLoopPreheader(Loop &L, ScalarEvolution &SE, AssumptionCache &AC,
 
   Value *MaxBoundry = nullptr;
   if (isIncrement(S)) {
-    MaxBoundry = getIterationVariable(L);
+    MaxBoundry = getMaxBoundry(L);
   } else {
-    MaxBoundry = getIterationVariable(S);
+    MaxBoundry = getMaxBoundry(S);
   }
 
   if (!MaxBoundry) {
