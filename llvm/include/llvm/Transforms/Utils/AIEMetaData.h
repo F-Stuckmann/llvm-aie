@@ -31,13 +31,15 @@ private:
   Instruction *LoopBound1;
   bool Increment;
 
-  const SCEV *getTruncInductionSCEV() const;
   void addAssumeToLoopHeader(uint64_t MinIterCount, const DominatorTree &DT,
                              LLVMContext *Context);
 
   Value *getMaxBoundry() const;
   bool isIncrement(const SCEV *S);
   Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context);
+
+  const SCEV *getTruncInductionSCEV() const;
+  const SCEV *getSCEV() const;
 
 public:
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,

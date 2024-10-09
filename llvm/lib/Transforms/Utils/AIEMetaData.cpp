@@ -164,6 +164,22 @@ Value *AIEMetaData::getMaxBoundry() const {
   return InductionVar;
 }
 
+const SCEV *AIEMetaData::getSCEV() const {
+  if (SE->isSCEVable(LoopBound0->getType())) {
+    const SCEV *S = SE->getSCEV(LoopBound0);
+    if (S->getSCEVType() == SCEVTypes::scAddRecExpr)
+      return S;
+  }
+  if (LoopBound1 && SE->isSCEVable(LoopBound1->getType())) {
+    const SCEV *S = SE->getSCEV(LoopBound1);
+    if (S->getSCEVType() == SCEVTypes::scAddRecExpr)
+      return S;
+  }
+  // fixme: if both are SCEVTypes::scAddRecExpr, exit with warning, since unkown
+  // behaviour
+  return nullptr;
+}
+
 const SCEV *AIEMetaData::getTruncInductionSCEV() const {
   const SCEV *S = nullptr;
 
@@ -248,29 +264,12 @@ void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
           ->getCondition());
   LoopBound0 = dyn_cast<Instruction>(CombInstr->getOperand(0));
   LoopBound1 = dyn_cast<Instruction>(CombInstr->getOperand(1));
+  LLVM_DEBUG(dbgs() << "Compare Instructions Operands: "; LoopBound0->dump());
+  if (LoopBound1)
+    LLVM_DEBUG(dbgs() << " Operand1"; LoopBound1->dump());
 
   // Find the canonical induction variable
-  const SCEV *S = nullptr;
-  for (PHINode &PN : L->getHeader()->phis()) {
-    if (!SE->isSCEVable(PN.getType()))
-      continue;
-    LLVM_DEBUG(dbgs() << "Phi: "; PN.dump(););
-    const SCEV *SIntern = SE->getSCEV(&PN);
-
-    for (uint i = 0; i < PN.getNumOperands(); i++) {
-      PN.getOperand(i)->dump();
-    }
-
-    InductionDescriptor ID;
-    if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SIntern)) {
-      if (AR->getLoop() == L && (&PN == LoopBound0 || &PN == LoopBound1)) {
-        LLVM_DEBUG(dbgs() << "Found SCEV "; SIntern->dump());
-        S = SIntern;
-        break;
-      }
-    }
-    LLVM_DEBUG(dbgs() << "SCEV "; SIntern->dump());
-  }
+  const SCEV *S = getSCEV();
 
   if (!S) {
     S = getTruncInductionSCEV();
