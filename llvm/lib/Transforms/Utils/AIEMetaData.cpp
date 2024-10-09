@@ -48,7 +48,7 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                       << L.getName() << " (" << MinIterCount.value() << ")\n");
     LLVM_DEBUG(L.getHeader()->getParent()->dump(););
 
-    addAssumeToLoopPreheader(MinIterCount.value(), DT, Context);
+    addAssumeToLoopHeader(MinIterCount.value(), DT, Context);
   }
 
   LLVM_DEBUG(dbgs() << "Dumping Full Function:"
@@ -236,18 +236,10 @@ const SCEV *AIEMetaData::getTruncInductionSCEV() const {
   return S;
 }
 
-// Function to add an assume in the loop preheader
-void AIEMetaData::addAssumeToLoopPreheader(uint64_t MinIterCount,
-                                           const DominatorTree &DT,
-                                           LLVMContext *Context) {
-  // Retrieve the Loop Preheader
-  BasicBlock *Preheader = L->getLoopPreheader();
-  if (!Preheader) {
-    errs() << "Loop does not have a preheader.\n";
-    return;
-  }
-
-  Module *M = Preheader->getModule();
+// Function to add an assume in the loop Header
+void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
+                                        const DominatorTree &DT,
+                                        LLVMContext *Context) {
 
   ICmpInst *CombInstr = dyn_cast<ICmpInst>(
       dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator())
@@ -316,31 +308,7 @@ void AIEMetaData::addAssumeToLoopPreheader(uint64_t MinIterCount,
   LLVM_DEBUG(dbgs() << "Minimum Value : "; MinValue->dump());
   LLVM_DEBUG(dbgs() << "Max Value : "; MaxBoundry->dump());
 
-  IRBuilder<> Builder(Preheader->getTerminator());
-
-  // if Limit Instruction is not in the preheader, add it so that the
-  // assertion has a defined start point.
-  if (isa<Instruction>(MaxBoundry)) {
-    Instruction *LimitInstruction = dyn_cast<Instruction>(MaxBoundry);
-    if (LimitInstruction->getParent() != Preheader &&
-        !DT.dominates(LimitInstruction->getParent(), Preheader)) {
-      if (dyn_cast<BranchInst>(Preheader->getTerminator())->isUnconditional() &&
-          L->hasLoopInvariantOperands(LimitInstruction)) {
-        assert(LimitInstruction->isSafeToRemove());
-        LLVM_DEBUG(dbgs() << "Moving Max Value (" << LimitInstruction
-                          << ") to Preheader: " << Preheader->getName()
-                          << "\n");
-        // what happens if the uses are defined in the BB?
-        LimitInstruction->moveBefore(Preheader->getTerminator());
-      } else {
-        LLVM_DEBUG(
-            dbgs() << "AIEMetadata-Warning: cannot hoist LimitInstruciton to "
-                      "Preheader, will abort \n");
-
-        return;
-      }
-    }
-  }
+  IRBuilder<> Builder(L->getHeader()->getTerminator());
 
   Value *Cmp = nullptr;
   if (MaxBoundry->getType() != MinValue->getType()) {
@@ -357,7 +325,8 @@ void AIEMetaData::addAssumeToLoopPreheader(uint64_t MinIterCount,
              dbgs() << "With Comparator:"; Cmp->dump());
 
   // Insert the `llvm.assume` Call
-  Function *AssumeFn = Intrinsic::getDeclaration(M, Intrinsic::assume);
+  Function *AssumeFn =
+      Intrinsic::getDeclaration(L->getHeader()->getModule(), Intrinsic::assume);
   CallInst *Call = Builder.CreateCall(AssumeFn, Cmp);
   Call->setTailCall(true);
   AC->registerAssumption(dyn_cast<AssumeInst>(Call));

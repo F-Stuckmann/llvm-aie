@@ -32,8 +32,8 @@ private:
   bool Increment;
 
   const SCEV *getTruncInductionSCEV() const;
-  void addAssumeToLoopPreheader(uint64_t MinIterCount, const DominatorTree &DT,
-                                LLVMContext *Context);
+  void addAssumeToLoopHeader(uint64_t MinIterCount, const DominatorTree &DT,
+                             LLVMContext *Context);
 
   Value *getMaxBoundry() const;
   bool isIncrement(const SCEV *S);
