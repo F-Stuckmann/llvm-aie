@@ -240,6 +240,8 @@ const SCEV *AIEMetaData::getTruncInductionSCEV() const {
 void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
                                         const DominatorTree &DT,
                                         LLVMContext *Context) {
+  LLVM_DEBUG(dbgs() << "Processing Loop Metadata (Result) of "
+                    << L->getHeader()->getParent()->getName() << " \n");
 
   ICmpInst *CombInstr = dyn_cast<ICmpInst>(
       dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator())
