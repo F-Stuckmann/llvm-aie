@@ -10,7 +10,1260 @@
 ; RUN: opt -S -passes='aie-metadata,loop-rotate' < %s | FileCheck %s
 
 
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z9incrementPii(ptr %ptr, i32 noundef %n) #0 {
+; CHECK-LABEL: @_Z9incrementPii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp slt i32 [[TMP0]], [[TMP1]]
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    [[TMP2:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP2]], i32 [[TMP3]]
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP4]], 8
+; CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP6:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i32, ptr [[TMP5]], i32 [[TMP6]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX1]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP7]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP8]], [[TMP9]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP0:![0-9]+]]
+; CHECK:       for.cond.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 0, ptr %i, align 4
+  br label %for.cond
 
+for.cond:                                         ; preds = %for.inc, %entry
+  %0 = load i32, ptr %i, align 4
+  %1 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %0, %1
+  br i1 %cmp, label %for.body, label %for.end
+
+for.body:                                         ; preds = %for.cond
+  %2 = load ptr, ptr %ptr.addr, align 4
+  %3 = load i32, ptr %i, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %2, i32 %3
+  %4 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %4, 8
+  %5 = load ptr, ptr %ptr.addr, align 4
+  %6 = load i32, ptr %i, align 4
+  %arrayidx1 = getelementptr inbounds i32, ptr %5, i32 %6
+  store i32 %add, ptr %arrayidx1, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body
+  %7 = load i32, ptr %i, align 4
+  %inc = add nsw i32 %7, 1
+  store i32 %inc, ptr %i, align 4
+  br label %for.cond, !llvm.loop !2
+
+for.end:                                          ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z18increment_multiplePii(ptr %ptr, i32 noundef %n) #0 {
+; CHECK-LABEL: @_Z18increment_multiplePii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp slt i32 [[TMP0]], [[TMP1]]
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    [[TMP2:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP2]], i32 [[TMP3]]
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP4]], 8
+; CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP6:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i32, ptr [[TMP5]], i32 [[TMP6]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX1]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ADD2:%.*]] = add nsw i32 [[TMP7]], 7
+; CHECK-NEXT:    store i32 [[ADD2]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP8]], [[TMP9]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP4:![0-9]+]]
+; CHECK:       for.cond.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc, %entry
+  %0 = load i32, ptr %i, align 4
+  %1 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %0, %1
+  br i1 %cmp, label %for.body, label %for.end
+
+for.body:                                         ; preds = %for.cond
+  %2 = load ptr, ptr %ptr.addr, align 4
+  %3 = load i32, ptr %i, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %2, i32 %3
+  %4 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %4, 8
+  %5 = load ptr, ptr %ptr.addr, align 4
+  %6 = load i32, ptr %i, align 4
+  %arrayidx1 = getelementptr inbounds i32, ptr %5, i32 %6
+  store i32 %add, ptr %arrayidx1, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body
+  %7 = load i32, ptr %i, align 4
+  %add2 = add nsw i32 %7, 7
+  store i32 %add2, ptr %i, align 4
+  br label %for.cond, !llvm.loop !6
+
+for.end:                                          ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z15conditionalLoopPii(ptr %ptr, i32 noundef %n) #0 {
+; CHECK-LABEL: @_Z15conditionalLoopPii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt i32 [[TMP0]], 0
+; CHECK-NEXT:    br i1 [[CMP]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP11:%.*]] = icmp slt i32 [[TMP1]], [[TMP2]]
+; CHECK-NEXT:    br i1 [[CMP11]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP3]], i32 [[TMP4]]
+; CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP5]], 8
+; CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX2:%.*]] = getelementptr inbounds i32, ptr [[TMP6]], i32 [[TMP7]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX2]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP8]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp slt i32 [[TMP9]], [[TMP10]]
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY]], label [[FOR_COND_FOR_END_CRIT_EDGE:%.*]]
+; CHECK:       for.cond.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  %0 = load i32, ptr %n.addr, align 4
+  %cmp = icmp sgt i32 %0, 0
+  br i1 %cmp, label %if.then, label %if.end
+
+if.then:                                          ; preds = %entry
+  store i32 0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc, %if.then
+  %1 = load i32, ptr %i, align 4
+  %2 = load i32, ptr %n.addr, align 4
+  %cmp1 = icmp slt i32 %1, %2
+  br i1 %cmp1, label %for.body, label %for.end
+
+for.body:                                         ; preds = %for.cond
+  %3 = load ptr, ptr %ptr.addr, align 4
+  %4 = load i32, ptr %i, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %3, i32 %4
+  %5 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %5, 8
+  %6 = load ptr, ptr %ptr.addr, align 4
+  %7 = load i32, ptr %i, align 4
+  %arrayidx2 = getelementptr inbounds i32, ptr %6, i32 %7
+  store i32 %add, ptr %arrayidx2, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body
+  %8 = load i32, ptr %i, align 4
+  %inc = add nsw i32 %8, 1
+  store i32 %inc, ptr %i, align 4
+  br label %for.cond, !llvm.loop !7
+
+for.end:                                          ; preds = %for.cond
+  br label %if.end
+
+if.end:                                           ; preds = %for.end, %entry
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z10nestedLoopPiii(ptr %ptr, i32 noundef %n, i32 noundef %m) #0 {
+; CHECK-LABEL: @_Z10nestedLoopPiii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[M_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[J:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[M:%.*]], ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP3:%.*]] = icmp slt i32 [[TMP0]], [[TMP1]]
+; CHECK-NEXT:    br i1 [[CMP3]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END7:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    store i32 0, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP21:%.*]] = icmp slt i32 [[TMP2]], [[TMP3]]
+; CHECK-NEXT:    br i1 [[CMP21]], label [[FOR_BODY3_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body3.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY3:%.*]]
+; CHECK:       for.body3:
+; CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP4]], i32 [[TMP5]]
+; CHECK-NEXT:    [[TMP6:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP6]], 8
+; CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX4:%.*]] = getelementptr inbounds i32, ptr [[TMP7]], i32 [[TMP8]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX4]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP9]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP11:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp slt i32 [[TMP10]], [[TMP11]]
+; CHECK-NEXT:    br i1 [[CMP2]], label [[FOR_BODY3]], label [[FOR_COND1_FOR_END_CRIT_EDGE:%.*]]
+; CHECK:       for.cond1.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    br label [[FOR_INC5:%.*]]
+; CHECK:       for.inc5:
+; CHECK-NEXT:    [[TMP12:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC6:%.*]] = add nsw i32 [[TMP12]], 1
+; CHECK-NEXT:    store i32 [[INC6]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP13:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP14:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP13]], [[TMP14]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END7_CRIT_EDGE:%.*]]
+; CHECK:       for.cond.for.end7_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END7]]
+; CHECK:       for.end7:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %m.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  %j = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 %m, ptr %m.addr, align 4
+  store i32 0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc5, %entry
+  %0 = load i32, ptr %i, align 4
+  %1 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %0, %1
+  br i1 %cmp, label %for.body, label %for.end7
+
+for.body:                                         ; preds = %for.cond
+  store i32 0, ptr %j, align 4
+  br label %for.cond1
+
+for.cond1:                                        ; preds = %for.inc, %for.body
+  %2 = load i32, ptr %j, align 4
+  %3 = load i32, ptr %m.addr, align 4
+  %cmp2 = icmp slt i32 %2, %3
+  br i1 %cmp2, label %for.body3, label %for.end
+
+for.body3:                                        ; preds = %for.cond1
+  %4 = load ptr, ptr %ptr.addr, align 4
+  %5 = load i32, ptr %j, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %4, i32 %5
+  %6 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %6, 8
+  %7 = load ptr, ptr %ptr.addr, align 4
+  %8 = load i32, ptr %i, align 4
+  %arrayidx4 = getelementptr inbounds i32, ptr %7, i32 %8
+  store i32 %add, ptr %arrayidx4, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body3
+  %9 = load i32, ptr %j, align 4
+  %inc = add nsw i32 %9, 1
+  store i32 %inc, ptr %j, align 4
+  br label %for.cond1, !llvm.loop !8
+
+for.end:                                          ; preds = %for.cond1
+  br label %for.inc5
+
+for.inc5:                                         ; preds = %for.end
+  %10 = load i32, ptr %i, align 4
+  %inc6 = add nsw i32 %10, 1
+  store i32 %inc6, ptr %i, align 4
+  br label %for.cond, !llvm.loop !9
+
+for.end7:                                         ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z17nestedpartialLoopPiiii(ptr %ptr, i32 noundef %n, i32 noundef %m, i32 noundef %o) #0 {
+; CHECK-LABEL: @_Z17nestedpartialLoopPiiii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[M_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[O_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[J:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[K:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[M:%.*]], ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[O:%.*]], ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP3:%.*]] = icmp slt i32 [[TMP0]], [[TMP1]]
+; CHECK-NEXT:    br i1 [[CMP3]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END16:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    store i32 0, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP21:%.*]] = icmp slt i32 [[TMP2]], [[TMP3]]
+; CHECK-NEXT:    br i1 [[CMP21]], label [[FOR_BODY3_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body3.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY3:%.*]]
+; CHECK:       for.body3:
+; CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP4]], i32 [[TMP5]]
+; CHECK-NEXT:    [[TMP6:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP6]], 8
+; CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX4:%.*]] = getelementptr inbounds i32, ptr [[TMP7]], i32 [[TMP8]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX4]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP9]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP11:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp slt i32 [[TMP10]], [[TMP11]]
+; CHECK-NEXT:    br i1 [[CMP2]], label [[FOR_BODY3]], label [[FOR_COND1_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP5:![0-9]+]]
+; CHECK:       for.cond1.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    store i32 0, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP12:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP13:%.*]] = load i32, ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    [[CMP62:%.*]] = icmp slt i32 [[TMP12]], [[TMP13]]
+; CHECK-NEXT:    br i1 [[CMP62]], label [[FOR_BODY7_LR_PH:%.*]], label [[FOR_END13:%.*]]
+; CHECK:       for.body7.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY7:%.*]]
+; CHECK:       for.body7:
+; CHECK-NEXT:    [[TMP14:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP15:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX8:%.*]] = getelementptr inbounds i32, ptr [[TMP14]], i32 [[TMP15]]
+; CHECK-NEXT:    [[TMP16:%.*]] = load i32, ptr [[ARRAYIDX8]], align 4
+; CHECK-NEXT:    [[ADD9:%.*]] = add nsw i32 [[TMP16]], 8
+; CHECK-NEXT:    [[TMP17:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP18:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[ARRAYIDX10:%.*]] = getelementptr inbounds i32, ptr [[TMP17]], i32 [[TMP18]]
+; CHECK-NEXT:    store i32 [[ADD9]], ptr [[ARRAYIDX10]], align 4
+; CHECK-NEXT:    br label [[FOR_INC11:%.*]]
+; CHECK:       for.inc11:
+; CHECK-NEXT:    [[TMP19:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[INC12:%.*]] = add nsw i32 [[TMP19]], 1
+; CHECK-NEXT:    store i32 [[INC12]], ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP20:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP21:%.*]] = load i32, ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    [[CMP6:%.*]] = icmp slt i32 [[TMP20]], [[TMP21]]
+; CHECK-NEXT:    br i1 [[CMP6]], label [[FOR_BODY7]], label [[FOR_COND5_FOR_END13_CRIT_EDGE:%.*]], !llvm.loop [[LOOP6:![0-9]+]]
+; CHECK:       for.cond5.for.end13_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END13]]
+; CHECK:       for.end13:
+; CHECK-NEXT:    br label [[FOR_INC14:%.*]]
+; CHECK:       for.inc14:
+; CHECK-NEXT:    [[TMP22:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC15:%.*]] = add nsw i32 [[TMP22]], 1
+; CHECK-NEXT:    store i32 [[INC15]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP23:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP24:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP23]], [[TMP24]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END16_CRIT_EDGE:%.*]], !llvm.loop [[LOOP7:![0-9]+]]
+; CHECK:       for.cond.for.end16_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END16]]
+; CHECK:       for.end16:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %m.addr = alloca i32, align 4
+  %o.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  %j = alloca i32, align 4
+  %k = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 %m, ptr %m.addr, align 4
+  store i32 %o, ptr %o.addr, align 4
+  store i32 0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc14, %entry
+  %0 = load i32, ptr %i, align 4
+  %1 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %0, %1
+  br i1 %cmp, label %for.body, label %for.end16
+
+for.body:                                         ; preds = %for.cond
+  store i32 0, ptr %j, align 4
+  br label %for.cond1
+
+for.cond1:                                        ; preds = %for.inc, %for.body
+  %2 = load i32, ptr %j, align 4
+  %3 = load i32, ptr %m.addr, align 4
+  %cmp2 = icmp slt i32 %2, %3
+  br i1 %cmp2, label %for.body3, label %for.end
+
+for.body3:                                        ; preds = %for.cond1
+  %4 = load ptr, ptr %ptr.addr, align 4
+  %5 = load i32, ptr %j, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %4, i32 %5
+  %6 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %6, 8
+  %7 = load ptr, ptr %ptr.addr, align 4
+  %8 = load i32, ptr %i, align 4
+  %arrayidx4 = getelementptr inbounds i32, ptr %7, i32 %8
+  store i32 %add, ptr %arrayidx4, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body3
+  %9 = load i32, ptr %j, align 4
+  %inc = add nsw i32 %9, 1
+  store i32 %inc, ptr %j, align 4
+  br label %for.cond1, !llvm.loop !10
+
+for.end:                                          ; preds = %for.cond1
+  store i32 0, ptr %k, align 4
+  br label %for.cond5
+
+for.cond5:                                        ; preds = %for.inc11, %for.end
+  %10 = load i32, ptr %k, align 4
+  %11 = load i32, ptr %o.addr, align 4
+  %cmp6 = icmp slt i32 %10, %11
+  br i1 %cmp6, label %for.body7, label %for.end13
+
+for.body7:                                        ; preds = %for.cond5
+  %12 = load ptr, ptr %ptr.addr, align 4
+  %13 = load i32, ptr %i, align 4
+  %arrayidx8 = getelementptr inbounds i32, ptr %12, i32 %13
+  %14 = load i32, ptr %arrayidx8, align 4
+  %add9 = add nsw i32 %14, 8
+  %15 = load ptr, ptr %ptr.addr, align 4
+  %16 = load i32, ptr %k, align 4
+  %arrayidx10 = getelementptr inbounds i32, ptr %15, i32 %16
+  store i32 %add9, ptr %arrayidx10, align 4
+  br label %for.inc11
+
+for.inc11:                                        ; preds = %for.body7
+  %17 = load i32, ptr %k, align 4
+  %inc12 = add nsw i32 %17, 1
+  store i32 %inc12, ptr %k, align 4
+  br label %for.cond5, !llvm.loop !11
+
+for.end13:                                        ; preds = %for.cond5
+  br label %for.inc14
+
+for.inc14:                                        ; preds = %for.end13
+  %18 = load i32, ptr %i, align 4
+  %inc15 = add nsw i32 %18, 1
+  store i32 %inc15, ptr %i, align 4
+  br label %for.cond, !llvm.loop !12
+
+for.end16:                                        ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z19deepnestedouterLoopPiiiii(ptr %ptr, i32 noundef %n, i32 noundef %m, i32 noundef %o, i32 noundef %p) #0 {
+; CHECK-LABEL: @_Z19deepnestedouterLoopPiiiii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[M_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[O_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[P_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[J:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[K:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[K12:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[M:%.*]], ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[O:%.*]], ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[P:%.*]], ptr [[P_ADDR]], align 4
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP4:%.*]] = icmp slt i32 [[TMP0]], [[TMP1]]
+; CHECK-NEXT:    br i1 [[CMP4]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END24:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    store i32 0, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP22:%.*]] = icmp slt i32 [[TMP2]], [[TMP3]]
+; CHECK-NEXT:    br i1 [[CMP22]], label [[FOR_BODY3_LR_PH:%.*]], label [[FOR_END11:%.*]]
+; CHECK:       for.body3.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY3:%.*]]
+; CHECK:       for.body3:
+; CHECK-NEXT:    store i32 0, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[P_ADDR]], align 4
+; CHECK-NEXT:    [[CMP51:%.*]] = icmp slt i32 [[TMP4]], [[TMP5]]
+; CHECK-NEXT:    br i1 [[CMP51]], label [[FOR_BODY6_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body6.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY6:%.*]]
+; CHECK:       for.body6:
+; CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP6]], i32 [[TMP7]]
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP8]], 8
+; CHECK-NEXT:    [[TMP9:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP11:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ADD7:%.*]] = add nsw i32 [[TMP10]], [[TMP11]]
+; CHECK-NEXT:    [[ARRAYIDX8:%.*]] = getelementptr inbounds i32, ptr [[TMP9]], i32 [[ADD7]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX8]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP12:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP12]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP13:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP14:%.*]] = load i32, ptr [[P_ADDR]], align 4
+; CHECK-NEXT:    [[CMP5:%.*]] = icmp slt i32 [[TMP13]], [[TMP14]]
+; CHECK-NEXT:    br i1 [[CMP5]], label [[FOR_BODY6]], label [[FOR_COND4_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP8:![0-9]+]]
+; CHECK:       for.cond4.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    br label [[FOR_INC9:%.*]]
+; CHECK:       for.inc9:
+; CHECK-NEXT:    [[TMP15:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[INC10:%.*]] = add nsw i32 [[TMP15]], 1
+; CHECK-NEXT:    store i32 [[INC10]], ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP16:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP17:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp slt i32 [[TMP16]], [[TMP17]]
+; CHECK-NEXT:    br i1 [[CMP2]], label [[FOR_BODY3]], label [[FOR_COND1_FOR_END11_CRIT_EDGE:%.*]], !llvm.loop [[LOOP9:![0-9]+]]
+; CHECK:       for.cond1.for.end11_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END11]]
+; CHECK:       for.end11:
+; CHECK-NEXT:    store i32 0, ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP18:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP19:%.*]] = load i32, ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    [[CMP143:%.*]] = icmp slt i32 [[TMP18]], [[TMP19]]
+; CHECK-NEXT:    br i1 [[CMP143]], label [[FOR_BODY15_LR_PH:%.*]], label [[FOR_END21:%.*]]
+; CHECK:       for.body15.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY15:%.*]]
+; CHECK:       for.body15:
+; CHECK-NEXT:    [[TMP20:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP21:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX16:%.*]] = getelementptr inbounds i32, ptr [[TMP20]], i32 [[TMP21]]
+; CHECK-NEXT:    [[TMP22:%.*]] = load i32, ptr [[ARRAYIDX16]], align 4
+; CHECK-NEXT:    [[ADD17:%.*]] = add nsw i32 [[TMP22]], 8
+; CHECK-NEXT:    [[TMP23:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP24:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[ARRAYIDX18:%.*]] = getelementptr inbounds i32, ptr [[TMP23]], i32 [[TMP24]]
+; CHECK-NEXT:    store i32 [[ADD17]], ptr [[ARRAYIDX18]], align 4
+; CHECK-NEXT:    br label [[FOR_INC19:%.*]]
+; CHECK:       for.inc19:
+; CHECK-NEXT:    [[TMP25:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[INC20:%.*]] = add nsw i32 [[TMP25]], 1
+; CHECK-NEXT:    store i32 [[INC20]], ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP26:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP27:%.*]] = load i32, ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    [[CMP14:%.*]] = icmp slt i32 [[TMP26]], [[TMP27]]
+; CHECK-NEXT:    br i1 [[CMP14]], label [[FOR_BODY15]], label [[FOR_COND13_FOR_END21_CRIT_EDGE:%.*]], !llvm.loop [[LOOP10:![0-9]+]]
+; CHECK:       for.cond13.for.end21_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END21]]
+; CHECK:       for.end21:
+; CHECK-NEXT:    br label [[FOR_INC22:%.*]]
+; CHECK:       for.inc22:
+; CHECK-NEXT:    [[TMP28:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC23:%.*]] = add nsw i32 [[TMP28]], 1
+; CHECK-NEXT:    store i32 [[INC23]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP29:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP30:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP29]], [[TMP30]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END24_CRIT_EDGE:%.*]], !llvm.loop [[LOOP11:![0-9]+]]
+; CHECK:       for.cond.for.end24_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END24]]
+; CHECK:       for.end24:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %m.addr = alloca i32, align 4
+  %o.addr = alloca i32, align 4
+  %p.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  %j = alloca i32, align 4
+  %k = alloca i32, align 4
+  %k12 = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 %m, ptr %m.addr, align 4
+  store i32 %o, ptr %o.addr, align 4
+  store i32 %p, ptr %p.addr, align 4
+  store i32 0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc22, %entry
+  %0 = load i32, ptr %i, align 4
+  %1 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %0, %1
+  br i1 %cmp, label %for.body, label %for.end24
+
+for.body:                                         ; preds = %for.cond
+  store i32 0, ptr %j, align 4
+  br label %for.cond1
+
+for.cond1:                                        ; preds = %for.inc9, %for.body
+  %2 = load i32, ptr %j, align 4
+  %3 = load i32, ptr %m.addr, align 4
+  %cmp2 = icmp slt i32 %2, %3
+  br i1 %cmp2, label %for.body3, label %for.end11
+
+for.body3:                                        ; preds = %for.cond1
+  store i32 0, ptr %k, align 4
+  br label %for.cond4
+
+for.cond4:                                        ; preds = %for.inc, %for.body3
+  %4 = load i32, ptr %k, align 4
+  %5 = load i32, ptr %p.addr, align 4
+  %cmp5 = icmp slt i32 %4, %5
+  br i1 %cmp5, label %for.body6, label %for.end
+
+for.body6:                                        ; preds = %for.cond4
+  %6 = load ptr, ptr %ptr.addr, align 4
+  %7 = load i32, ptr %j, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %6, i32 %7
+  %8 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %8, 8
+  %9 = load ptr, ptr %ptr.addr, align 4
+  %10 = load i32, ptr %k, align 4
+  %11 = load i32, ptr %i, align 4
+  %add7 = add nsw i32 %10, %11
+  %arrayidx8 = getelementptr inbounds i32, ptr %9, i32 %add7
+  store i32 %add, ptr %arrayidx8, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body6
+  %12 = load i32, ptr %k, align 4
+  %inc = add nsw i32 %12, 1
+  store i32 %inc, ptr %k, align 4
+  br label %for.cond4, !llvm.loop !13
+
+for.end:                                          ; preds = %for.cond4
+  br label %for.inc9
+
+for.inc9:                                         ; preds = %for.end
+  %13 = load i32, ptr %j, align 4
+  %inc10 = add nsw i32 %13, 1
+  store i32 %inc10, ptr %j, align 4
+  br label %for.cond1, !llvm.loop !14
+
+for.end11:                                        ; preds = %for.cond1
+  store i32 0, ptr %k12, align 4
+  br label %for.cond13
+
+for.cond13:                                       ; preds = %for.inc19, %for.end11
+  %14 = load i32, ptr %k12, align 4
+  %15 = load i32, ptr %o.addr, align 4
+  %cmp14 = icmp slt i32 %14, %15
+  br i1 %cmp14, label %for.body15, label %for.end21
+
+for.body15:                                       ; preds = %for.cond13
+  %16 = load ptr, ptr %ptr.addr, align 4
+  %17 = load i32, ptr %i, align 4
+  %arrayidx16 = getelementptr inbounds i32, ptr %16, i32 %17
+  %18 = load i32, ptr %arrayidx16, align 4
+  %add17 = add nsw i32 %18, 8
+  %19 = load ptr, ptr %ptr.addr, align 4
+  %20 = load i32, ptr %k12, align 4
+  %arrayidx18 = getelementptr inbounds i32, ptr %19, i32 %20
+  store i32 %add17, ptr %arrayidx18, align 4
+  br label %for.inc19
+
+for.inc19:                                        ; preds = %for.body15
+  %21 = load i32, ptr %k12, align 4
+  %inc20 = add nsw i32 %21, 1
+  store i32 %inc20, ptr %k12, align 4
+  br label %for.cond13, !llvm.loop !15
+
+for.end21:                                        ; preds = %for.cond13
+  br label %for.inc22
+
+for.inc22:                                        ; preds = %for.end21
+  %22 = load i32, ptr %i, align 4
+  %inc23 = add nsw i32 %22, 1
+  store i32 %inc23, ptr %i, align 4
+  br label %for.cond, !llvm.loop !16
+
+for.end24:                                        ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z19innerDeepNestedLoopPiiiii(ptr %ptr, i32 noundef %n, i32 noundef %m, i32 noundef %o, i32 noundef %p) #0 {
+; CHECK-LABEL: @_Z19innerDeepNestedLoopPiiiii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[M_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[O_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[P_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[J:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[K:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[K12:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[M:%.*]], ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[O:%.*]], ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[P:%.*]], ptr [[P_ADDR]], align 4
+; CHECK-NEXT:    store i32 0, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP4:%.*]] = icmp slt i32 [[TMP0]], [[TMP1]]
+; CHECK-NEXT:    br i1 [[CMP4]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END24:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    store i32 0, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP22:%.*]] = icmp slt i32 [[TMP2]], [[TMP3]]
+; CHECK-NEXT:    br i1 [[CMP22]], label [[FOR_BODY3_LR_PH:%.*]], label [[FOR_END11:%.*]]
+; CHECK:       for.body3.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY3:%.*]]
+; CHECK:       for.body3:
+; CHECK-NEXT:    store i32 0, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[P_ADDR]], align 4
+; CHECK-NEXT:    [[CMP51:%.*]] = icmp slt i32 [[TMP4]], [[TMP5]]
+; CHECK-NEXT:    br i1 [[CMP51]], label [[FOR_BODY6_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body6.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY6:%.*]]
+; CHECK:       for.body6:
+; CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP6]], i32 [[TMP7]]
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP8]], 8
+; CHECK-NEXT:    [[TMP9:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP11:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ADD7:%.*]] = add nsw i32 [[TMP10]], [[TMP11]]
+; CHECK-NEXT:    [[ARRAYIDX8:%.*]] = getelementptr inbounds i32, ptr [[TMP9]], i32 [[ADD7]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX8]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP12:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP12]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP13:%.*]] = load i32, ptr [[K]], align 4
+; CHECK-NEXT:    [[TMP14:%.*]] = load i32, ptr [[P_ADDR]], align 4
+; CHECK-NEXT:    [[CMP5:%.*]] = icmp slt i32 [[TMP13]], [[TMP14]]
+; CHECK-NEXT:    br i1 [[CMP5]], label [[FOR_BODY6]], label [[FOR_COND4_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP12:![0-9]+]]
+; CHECK:       for.cond4.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    br label [[FOR_INC9:%.*]]
+; CHECK:       for.inc9:
+; CHECK-NEXT:    [[TMP15:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[INC10:%.*]] = add nsw i32 [[TMP15]], 1
+; CHECK-NEXT:    store i32 [[INC10]], ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP16:%.*]] = load i32, ptr [[J]], align 4
+; CHECK-NEXT:    [[TMP17:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp slt i32 [[TMP16]], [[TMP17]]
+; CHECK-NEXT:    br i1 [[CMP2]], label [[FOR_BODY3]], label [[FOR_COND1_FOR_END11_CRIT_EDGE:%.*]], !llvm.loop [[LOOP13:![0-9]+]]
+; CHECK:       for.cond1.for.end11_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END11]]
+; CHECK:       for.end11:
+; CHECK-NEXT:    store i32 0, ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP18:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP19:%.*]] = load i32, ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    [[CMP143:%.*]] = icmp slt i32 [[TMP18]], [[TMP19]]
+; CHECK-NEXT:    br i1 [[CMP143]], label [[FOR_BODY15_LR_PH:%.*]], label [[FOR_END21:%.*]]
+; CHECK:       for.body15.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY15:%.*]]
+; CHECK:       for.body15:
+; CHECK-NEXT:    [[TMP20:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP21:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX16:%.*]] = getelementptr inbounds i32, ptr [[TMP20]], i32 [[TMP21]]
+; CHECK-NEXT:    [[TMP22:%.*]] = load i32, ptr [[ARRAYIDX16]], align 4
+; CHECK-NEXT:    [[ADD17:%.*]] = add nsw i32 [[TMP22]], 8
+; CHECK-NEXT:    [[TMP23:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP24:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[ARRAYIDX18:%.*]] = getelementptr inbounds i32, ptr [[TMP23]], i32 [[TMP24]]
+; CHECK-NEXT:    store i32 [[ADD17]], ptr [[ARRAYIDX18]], align 4
+; CHECK-NEXT:    br label [[FOR_INC19:%.*]]
+; CHECK:       for.inc19:
+; CHECK-NEXT:    [[TMP25:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[INC20:%.*]] = add nsw i32 [[TMP25]], 1
+; CHECK-NEXT:    store i32 [[INC20]], ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP26:%.*]] = load i32, ptr [[K12]], align 4
+; CHECK-NEXT:    [[TMP27:%.*]] = load i32, ptr [[O_ADDR]], align 4
+; CHECK-NEXT:    [[CMP14:%.*]] = icmp slt i32 [[TMP26]], [[TMP27]]
+; CHECK-NEXT:    br i1 [[CMP14]], label [[FOR_BODY15]], label [[FOR_COND13_FOR_END21_CRIT_EDGE:%.*]], !llvm.loop [[LOOP14:![0-9]+]]
+; CHECK:       for.cond13.for.end21_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END21]]
+; CHECK:       for.end21:
+; CHECK-NEXT:    br label [[FOR_INC22:%.*]]
+; CHECK:       for.inc22:
+; CHECK-NEXT:    [[TMP28:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC23:%.*]] = add nsw i32 [[TMP28]], 1
+; CHECK-NEXT:    store i32 [[INC23]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP29:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP30:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP29]], [[TMP30]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END24_CRIT_EDGE:%.*]], !llvm.loop [[LOOP15:![0-9]+]]
+; CHECK:       for.cond.for.end24_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END24]]
+; CHECK:       for.end24:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %m.addr = alloca i32, align 4
+  %o.addr = alloca i32, align 4
+  %p.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  %j = alloca i32, align 4
+  %k = alloca i32, align 4
+  %k12 = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 %m, ptr %m.addr, align 4
+  store i32 %o, ptr %o.addr, align 4
+  store i32 %p, ptr %p.addr, align 4
+  store i32 0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc22, %entry
+  %0 = load i32, ptr %i, align 4
+  %1 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %0, %1
+  br i1 %cmp, label %for.body, label %for.end24
+
+for.body:                                         ; preds = %for.cond
+  store i32 0, ptr %j, align 4
+  br label %for.cond1
+
+for.cond1:                                        ; preds = %for.inc9, %for.body
+  %2 = load i32, ptr %j, align 4
+  %3 = load i32, ptr %m.addr, align 4
+  %cmp2 = icmp slt i32 %2, %3
+  br i1 %cmp2, label %for.body3, label %for.end11
+
+for.body3:                                        ; preds = %for.cond1
+  store i32 0, ptr %k, align 4
+  br label %for.cond4
+
+for.cond4:                                        ; preds = %for.inc, %for.body3
+  %4 = load i32, ptr %k, align 4
+  %5 = load i32, ptr %p.addr, align 4
+  %cmp5 = icmp slt i32 %4, %5
+  br i1 %cmp5, label %for.body6, label %for.end
+
+for.body6:                                        ; preds = %for.cond4
+  %6 = load ptr, ptr %ptr.addr, align 4
+  %7 = load i32, ptr %j, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %6, i32 %7
+  %8 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %8, 8
+  %9 = load ptr, ptr %ptr.addr, align 4
+  %10 = load i32, ptr %k, align 4
+  %11 = load i32, ptr %i, align 4
+  %add7 = add nsw i32 %10, %11
+  %arrayidx8 = getelementptr inbounds i32, ptr %9, i32 %add7
+  store i32 %add, ptr %arrayidx8, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body6
+  %12 = load i32, ptr %k, align 4
+  %inc = add nsw i32 %12, 1
+  store i32 %inc, ptr %k, align 4
+  br label %for.cond4, !llvm.loop !17
+
+for.end:                                          ; preds = %for.cond4
+  br label %for.inc9
+
+for.inc9:                                         ; preds = %for.end
+  %13 = load i32, ptr %j, align 4
+  %inc10 = add nsw i32 %13, 1
+  store i32 %inc10, ptr %j, align 4
+  br label %for.cond1, !llvm.loop !18
+
+for.end11:                                        ; preds = %for.cond1
+  store i32 0, ptr %k12, align 4
+  br label %for.cond13
+
+for.cond13:                                       ; preds = %for.inc19, %for.end11
+  %14 = load i32, ptr %k12, align 4
+  %15 = load i32, ptr %o.addr, align 4
+  %cmp14 = icmp slt i32 %14, %15
+  br i1 %cmp14, label %for.body15, label %for.end21
+
+for.body15:                                       ; preds = %for.cond13
+  %16 = load ptr, ptr %ptr.addr, align 4
+  %17 = load i32, ptr %i, align 4
+  %arrayidx16 = getelementptr inbounds i32, ptr %16, i32 %17
+  %18 = load i32, ptr %arrayidx16, align 4
+  %add17 = add nsw i32 %18, 8
+  %19 = load ptr, ptr %ptr.addr, align 4
+  %20 = load i32, ptr %k12, align 4
+  %arrayidx18 = getelementptr inbounds i32, ptr %19, i32 %20
+  store i32 %add17, ptr %arrayidx18, align 4
+  br label %for.inc19
+
+for.inc19:                                        ; preds = %for.body15
+  %21 = load i32, ptr %k12, align 4
+  %inc20 = add nsw i32 %21, 1
+  store i32 %inc20, ptr %k12, align 4
+  br label %for.cond13, !llvm.loop !19
+
+for.end21:                                        ; preds = %for.cond13
+  br label %for.inc22
+
+for.inc22:                                        ; preds = %for.end21
+  %22 = load i32, ptr %i, align 4
+  %inc23 = add nsw i32 %22, 1
+  store i32 %inc23, ptr %i, align 4
+  br label %for.cond, !llvm.loop !20
+
+for.end24:                                        ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z9decrementPii(ptr %ptr, i32 noundef %n) #0 {
+; CHECK-LABEL: @_Z9decrementPii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[TMP0]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp sgt i32 [[TMP1]], 0
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    [[TMP2:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP2]], i32 [[TMP3]]
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP4]], 8
+; CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP6:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i32, ptr [[TMP5]], i32 [[TMP6]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX1]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[DEC:%.*]] = add nsw i32 [[TMP7]], -1
+; CHECK-NEXT:    store i32 [[DEC]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt i32 [[TMP8]], 0
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP16:![0-9]+]]
+; CHECK:       for.cond.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  %0 = load i32, ptr %n.addr, align 4
+  store i32 %0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc, %entry
+  %1 = load i32, ptr %i, align 4
+  %cmp = icmp sgt i32 %1, 0
+  br i1 %cmp, label %for.body, label %for.end
+
+for.body:                                         ; preds = %for.cond
+  %2 = load ptr, ptr %ptr.addr, align 4
+  %3 = load i32, ptr %i, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %2, i32 %3
+  %4 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %4, 8
+  %5 = load ptr, ptr %ptr.addr, align 4
+  %6 = load i32, ptr %i, align 4
+  %arrayidx1 = getelementptr inbounds i32, ptr %5, i32 %6
+  store i32 %add, ptr %arrayidx1, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body
+  %7 = load i32, ptr %i, align 4
+  %dec = add nsw i32 %7, -1
+  store i32 %dec, ptr %i, align 4
+  br label %for.cond, !llvm.loop !21
+
+for.end:                                          ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z18decrement_multiplePii(ptr %ptr, i32 noundef %n) #0 {
+; CHECK-LABEL: @_Z18decrement_multiplePii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[TMP0]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp sgt i32 [[TMP1]], 0
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    [[TMP2:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP2]], i32 [[TMP3]]
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP4]], 8
+; CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP6:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i32, ptr [[TMP5]], i32 [[TMP6]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX1]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[SUB:%.*]] = sub nsw i32 [[TMP7]], 7
+; CHECK-NEXT:    store i32 [[SUB]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt i32 [[TMP8]], 0
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP17:![0-9]+]]
+; CHECK:       for.cond.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  %0 = load i32, ptr %n.addr, align 4
+  store i32 %0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc, %entry
+  %1 = load i32, ptr %i, align 4
+  %cmp = icmp sgt i32 %1, 0
+  br i1 %cmp, label %for.body, label %for.end
+
+for.body:                                         ; preds = %for.cond
+  %2 = load ptr, ptr %ptr.addr, align 4
+  %3 = load i32, ptr %i, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %2, i32 %3
+  %4 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %4, 8
+  %5 = load ptr, ptr %ptr.addr, align 4
+  %6 = load i32, ptr %i, align 4
+  %arrayidx1 = getelementptr inbounds i32, ptr %5, i32 %6
+  store i32 %add, ptr %arrayidx1, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body
+  %7 = load i32, ptr %i, align 4
+  %sub = sub nsw i32 %7, 7
+  store i32 %sub, ptr %i, align 4
+  br label %for.cond, !llvm.loop !22
+
+for.end:                                          ; preds = %for.cond
+  ret void
+}
+
+; Function Attrs: mustprogress noinline nounwind optnone
+define dso_local void @_Z19increment_start_posPiii(ptr %ptr, i32 noundef %n, i32 noundef %m) #0 {
+; CHECK-LABEL: @_Z19increment_start_posPiii(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[PTR_ADDR:%.*]] = alloca ptr, align 4
+; CHECK-NEXT:    [[N_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[M_ADDR:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    [[I:%.*]] = alloca i32, align 4
+; CHECK-NEXT:    store ptr [[PTR:%.*]], ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[N:%.*]], ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[M:%.*]], ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[M_ADDR]], align 4
+; CHECK-NEXT:    store i32 [[TMP0]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp slt i32 [[TMP1]], [[TMP2]]
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP4:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i32, ptr [[TMP3]], i32 [[TMP4]]
+; CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP5]], 8
+; CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[PTR_ADDR]], align 4
+; CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i32, ptr [[TMP6]], i32 [[TMP7]]
+; CHECK-NEXT:    store i32 [[ADD]], ptr [[ARRAYIDX1]], align 4
+; CHECK-NEXT:    br label [[FOR_INC:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[INC:%.*]] = add nsw i32 [[TMP8]], 1
+; CHECK-NEXT:    store i32 [[INC]], ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[I]], align 4
+; CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[N_ADDR]], align 4
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[TMP9]], [[TMP10]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_FOR_END_CRIT_EDGE:%.*]], !llvm.loop [[LOOP18:![0-9]+]]
+; CHECK:       for.cond.for.end_crit_edge:
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %ptr.addr = alloca ptr, align 4
+  %n.addr = alloca i32, align 4
+  %m.addr = alloca i32, align 4
+  %i = alloca i32, align 4
+  store ptr %ptr, ptr %ptr.addr, align 4
+  store i32 %n, ptr %n.addr, align 4
+  store i32 %m, ptr %m.addr, align 4
+  %0 = load i32, ptr %m.addr, align 4
+  store i32 %0, ptr %i, align 4
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc, %entry
+  %1 = load i32, ptr %i, align 4
+  %2 = load i32, ptr %n.addr, align 4
+  %cmp = icmp slt i32 %1, %2
+  br i1 %cmp, label %for.body, label %for.end
+
+for.body:                                         ; preds = %for.cond
+  %3 = load ptr, ptr %ptr.addr, align 4
+  %4 = load i32, ptr %i, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %3, i32 %4
+  %5 = load i32, ptr %arrayidx, align 4
+  %add = add nsw i32 %5, 8
+  %6 = load ptr, ptr %ptr.addr, align 4
+  %7 = load i32, ptr %i, align 4
+  %arrayidx1 = getelementptr inbounds i32, ptr %6, i32 %7
+  store i32 %add, ptr %arrayidx1, align 4
+  br label %for.inc
+
+for.inc:                                          ; preds = %for.body
+  %8 = load i32, ptr %i, align 4
+  %inc = add nsw i32 %8, 1
+  store i32 %inc, ptr %i, align 4
+  br label %for.cond, !llvm.loop !23
+
+for.end:                                          ; preds = %for.cond
+  ret void
+}
 
 
 
@@ -31,14 +1284,14 @@ define  dso_local void @assume_insertion_only_in_correct_header(ptr nonnull alig
 ; CHECK-NEXT:    [[INC103]] = add nuw nsw i32 [[J_0349]], 1
 ; CHECK-NEXT:    [[TMP1:%.*]] = load i32, ptr [[OUTER_G]], align 8
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i32 [[INC103]], [[TMP1]]
-; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_CLEANUP:%.*]], !llvm.loop [[LOOP0:![0-9]+]]
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY]], label [[FOR_COND_CLEANUP:%.*]], !llvm.loop [[LOOP4]]
 ; CHECK:       for.body11:
 ; CHECK-NEXT:    [[I_0315:%.*]] = phi i32 [ 0, [[FOR_BODY]] ], [ [[INC:%.*]], [[FOR_BODY11]] ]
 ; CHECK-NEXT:    [[INC]] = add nuw nsw i32 [[I_0315]], 1
 ; CHECK-NEXT:    [[EXITCOND_NOT:%.*]] = icmp eq i32 [[INC]], [[TMP0]]
 ; CHECK-NEXT:    [[TMP2:%.*]] = icmp sgt i32 [[TMP0]], 3
 ; CHECK-NEXT:    tail call void @llvm.assume(i1 [[TMP2]])
-; CHECK-NEXT:    br i1 [[EXITCOND_NOT]], label [[FOR_COND8_FOR_COND_CLEANUP10_CRIT_EDGE]], label [[FOR_BODY11]], !llvm.loop [[LOOP0]]
+; CHECK-NEXT:    br i1 [[EXITCOND_NOT]], label [[FOR_COND8_FOR_COND_CLEANUP10_CRIT_EDGE]], label [[FOR_BODY11]], !llvm.loop [[LOOP4]]
 ;
 for.body.lr.ph:
   %inner_g = getelementptr inbounds i8, ptr %params, i20 12
@@ -66,7 +1319,23 @@ for.body11:                                       ; preds = %for.body, %for.body
   br i1 %exitcond.not, label %for.cond8.for.cond.cleanup10_crit_edge, label %for.body11, !llvm.loop !6
 }
 
+!2 = distinct !{!2, !7, !8, !9}
 !6 = distinct !{!6, !7, !8, !9}
 !7 = !{!"llvm.loop.mustprogress"}
 !8 = !{!"llvm.loop.itercount.range", i64 4}
 !9 = !{!"llvm.loop.unroll.disable"}
+!10 = distinct !{!10, !7, !8, !9}
+!11 = distinct !{!11, !7}
+!12 = distinct !{!12, !7}
+!13 = distinct !{!13, !7}
+!14 = distinct !{!14, !7, !8, !9}
+!15 = distinct !{!15, !7}
+!16 = distinct !{!16, !7}
+!17 = distinct !{!17, !7, !8, !9}
+!18 = distinct !{!18, !7}
+!19 = distinct !{!19, !7}
+!20 = distinct !{!20, !7}
+!21 = distinct !{!21, !7, !8, !9}
+!22 = distinct !{!22, !7, !8, !9}
+!23 = distinct !{!23, !7, !24, !9}
+!24 = !{!"llvm.loop.itercount.range", i64 2}
