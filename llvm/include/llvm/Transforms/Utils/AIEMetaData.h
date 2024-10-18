@@ -25,6 +25,7 @@ private:
   LLVMContext *Context;
   ScalarEvolution *SE;
   AssumptionCache *AC;
+  DominatorTree *DT;
   const Loop *L;
   Instruction *LoopBound0;
   Instruction *LoopBound1;

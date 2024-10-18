@@ -11,6 +11,7 @@
 
 #include "llvm/Transforms/Utils/AIEMetaData.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 
 #define DEBUG_TYPE "aie-metadata"
@@ -38,6 +39,7 @@ PreservedAnalyses AIEMetaData::run(Function &F, FunctionAnalysisManager &FAM) {
   }
 
   AC = &FAM.getResult<AssumptionAnalysis>(F);
+  DT = &FAM.getResult<DominatorTreeAnalysis>(F);
 
   for (auto L : *LI) {
     extractMetaData(*L);
@@ -51,6 +53,7 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                                    LPMUpdater &U) {
   SE = &AR.SE;
   AC = &AR.AC;
+  DT = &AR.DT;
   extractMetaData(L);
   return PreservedAnalyses::all();
 }
@@ -337,6 +340,18 @@ void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
     LLVM_DEBUG(dbgs() << "AIEMetadata-Warning: Could not find Iteration "
                          "Variable. Will not process Metadata\n");
     return;
+  }
+  if (isa<Instruction>(MaxBoundry)) {
+    BasicBlock *MaxBB = dyn_cast<Instruction>(MaxBoundry)->getParent();
+    if (MaxBB && !DT->dominates(MaxBB, L->getHeader())) {
+      LLVM_DEBUG(dbgs() << "AIEMetadata-Warning: MaxBoundry is not in the same "
+                           "BB as the Header ("
+                        << L->getHeader()->getName() << ")\nMaxBoundry =";
+                 MaxBoundry->dump(););
+      if (MaxBB)
+        LLVM_DEBUG(dbgs() << "MaxBoundry BB = " << MaxBB->getName() << "\n";);
+      return;
+    }
   }
 
   if (isa<Constant>(MaxBoundry)) {
