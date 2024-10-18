@@ -11,27 +11,55 @@
 
 #include "llvm/Transforms/Utils/AIEMetaData.h"
 #include "llvm/Analysis/AssumptionCache.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/Transforms/Scalar/IndVarSimplify.h"
-#include "llvm/Transforms/Utils/LoopUtils.h"
 
 #define DEBUG_TYPE "aie-metadata"
 
 using namespace llvm;
 
+bool AIEMetaData::hasAssumption(Value *Header) {
+  for (auto A : AC->assumptions()) {
+    if (A.Assume && isa<Instruction>(A.Assume)) {
+      Instruction *I = dyn_cast<Instruction>(A.Assume);
+      if (I->getParent() == Header) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+PreservedAnalyses AIEMetaData::run(Function &F, FunctionAnalysisManager &FAM) {
+  LoopInfo *LI = &FAM.getResult<LoopAnalysis>(F);
+  SE = &FAM.getResult<ScalarEvolutionAnalysis>(F);
+  if (!SE) {
+    dbgs() << "Could not get SE!\n";
+    return PreservedAnalyses::all();
+  }
+
+  AC = &FAM.getResult<AssumptionAnalysis>(F);
+
+  for (auto L : *LI) {
+    extractMetaData(*L);
+  }
+
+  return PreservedAnalyses::all();
+}
+
 PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                                    LoopStandardAnalysisResults &AR,
                                    LPMUpdater &U) {
-  Context = &L.getHeader()->getParent()->getContext();
-  this->L = &L;
   SE = &AR.SE;
   AC = &AR.AC;
-  DominatorTree DT = DominatorTree(*L.getHeader()->getParent());
+  extractMetaData(L);
+  return PreservedAnalyses::all();
+}
+
+bool AIEMetaData::extractMetaData(Loop &L) {
+  this->L = &L;
+  Context = &L.getHeader()->getParent()->getContext();
 
   std::optional<int> MinIterCount = getMinIterCounts(&L);
-
-  // since we assume that t
 
   // dump loop summary
   LLVM_DEBUG(dbgs() << "Preheader:");
@@ -46,15 +74,26 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
     LLVM_DEBUG(dbgs() << "Processing Loop Metadata of "
                       << L.getHeader()->getParent()->getName() << " "
                       << L.getName() << " (" << MinIterCount.value() << ")\n");
+
+    // Fixme: properly check if the Header already has an assumption.
+    //  only
+    // if (hasAssumption(L.getHeader())) {
+    //   LLVM_DEBUG(dbgs() << "Assumption for Header " <<
+    //   L.getHeader()->getName()
+    //                     << "\n");
+    //   return false;
+    // }
+
     LLVM_DEBUG(L.getHeader()->getParent()->dump(););
 
-    addAssumeToLoopHeader(MinIterCount.value(), DT, Context);
+    addAssumeToLoopHeader(MinIterCount.value(), Context);
+    LLVM_DEBUG(dbgs() << "Dumping Full Function:"
+                      << L.getHeader()->getParent()->getName() << "\n";
+               L.getHeader()->getParent()->dump(););
+    return true;
   }
 
-  LLVM_DEBUG(dbgs() << "Dumping Full Function:"
-                    << L.getHeader()->getParent()->getName() << "\n";
-             L.getHeader()->getParent()->dump(););
-  return PreservedAnalyses::all();
+  return false;
 }
 
 bool AIEMetaData::isIncrement(const SCEV *S) {
@@ -107,6 +146,7 @@ Value *AIEMetaData::calcMinValue(const SCEV *S, int MinIterCount,
 
   int MaxValue = std::abs(IncValue * MinIterCount);
   // SGT is used to compare, so I must subtract 1
+  // FIXME: only decrement if the condition is lt (on EQ dont do this)
   if (Increment)
     MaxValue--;
 
@@ -167,12 +207,12 @@ Value *AIEMetaData::getMaxBoundry() const {
 const SCEV *AIEMetaData::getSCEV() const {
   if (SE->isSCEVable(LoopBound0->getType())) {
     const SCEV *S = SE->getSCEV(LoopBound0);
-    if (S->getSCEVType() == SCEVTypes::scAddRecExpr)
+    if (S && S->getSCEVType() == SCEVTypes::scAddRecExpr)
       return S;
   }
   if (LoopBound1 && SE->isSCEVable(LoopBound1->getType())) {
     const SCEV *S = SE->getSCEV(LoopBound1);
-    if (S->getSCEVType() == SCEVTypes::scAddRecExpr)
+    if (S && S->getSCEVType() == SCEVTypes::scAddRecExpr)
       return S;
   }
   // fixme: if both are SCEVTypes::scAddRecExpr, exit with warning, since unkown
@@ -254,17 +294,17 @@ const SCEV *AIEMetaData::getTruncInductionSCEV() const {
 
 // Function to add an assume in the loop Header
 void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
-                                        const DominatorTree &DT,
                                         LLVMContext *Context) {
   LLVM_DEBUG(dbgs() << "Processing Loop Metadata (Result) of "
-                    << L->getHeader()->getParent()->getName() << " \n");
+                    << L->getHeader()->getParent()->getName() << " "
+                    << L->getName() << " (" << MinIterCount << ")\n");
 
   ICmpInst *CombInstr = dyn_cast<ICmpInst>(
       dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator())
           ->getCondition());
   LoopBound0 = dyn_cast<Instruction>(CombInstr->getOperand(0));
   LoopBound1 = dyn_cast<Instruction>(CombInstr->getOperand(1));
-  LLVM_DEBUG(dbgs() << "Compare Instructions Operands: "; LoopBound0->dump());
+  LLVM_DEBUG(dbgs() << "Compare Instructions \nOperand0"; LoopBound0->dump());
   if (LoopBound1)
     LLVM_DEBUG(dbgs() << " Operand1"; LoopBound1->dump());
 

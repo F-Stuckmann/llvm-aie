@@ -15,6 +15,9 @@
 /// helpers to aid in analyzing, debugging, and testing passes and pass
 /// pipelines.
 ///
+/// Modifications (c) Copyright 2024 Advanced Micro Devices, Inc. or its
+/// affiliates
+///
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/Statistic.h"

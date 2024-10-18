@@ -13,7 +13,6 @@
 #define LLVM_TRANSFORMS_UTILS_AIEMETADATAPASS_H
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Transforms/Scalar/LoopPassManager.h"
 
 namespace llvm {
 
@@ -31,12 +30,15 @@ private:
   Instruction *LoopBound1;
   bool Increment;
 
-  void addAssumeToLoopHeader(uint64_t MinIterCount, const DominatorTree &DT,
-                             LLVMContext *Context);
+  bool extractMetaData(Loop &L);
+
+  void addAssumeToLoopHeader(uint64_t MinIterCount, LLVMContext *Context);
 
   Value *getMaxBoundry() const;
   bool isIncrement(const SCEV *S);
   Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context);
+
+  bool hasAssumption(Value *Header);
 
   const SCEV *getTruncInductionSCEV() const;
   const SCEV *getSCEV() const;
@@ -44,6 +46,8 @@ private:
 public:
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
+
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
 
   static bool isRequired() { return true; }
 };
