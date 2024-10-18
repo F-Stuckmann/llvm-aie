@@ -1438,6 +1438,31 @@ for.body11:                                       ; preds = %for.body, %for.body
   br i1 %exitcond.not, label %for.cond8.for.cond.cleanup10_crit_edge, label %for.body11, !llvm.loop !6
 }
 
+; Function Attrs: mustprogress noinline
+define  dso_local void @regression(ptr nonnull align 32 dereferenceable(64) %params) {
+for.body.lr.ph:
+  %0 = load i32, ptr %params, align 32
+  %div7 = lshr i32 %0, 6
+  %cmp = icmp ugt i32 %0, 511
+  tail call void @llvm.assume(i1 %cmp)
+  br label %for.body
+
+for.cond.cleanup:
+  ret void
+
+for.body:
+  %i.014 = phi i32 [ 0, %for.body.lr.ph ], [ %add, %exit ]
+  br label %if.end.i.i.i.i
+
+if.end.i.i.i.i:
+  br label %exit
+
+exit: ; preds = %if.end.i.i.i.i
+  %add = add nuw nsw i32 %i.014, 1
+  %exitcond.not = icmp eq i32 %add, %div7
+  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body, !llvm.loop !2960
+}
+
 !2 = distinct !{!2, !7, !8, !9}
 !6 = distinct !{!6, !7, !8, !9}
 !7 = !{!"llvm.loop.mustprogress"}
