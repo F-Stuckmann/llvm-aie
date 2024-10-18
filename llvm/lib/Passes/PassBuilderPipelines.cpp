@@ -923,6 +923,9 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
                                 InlineContext{Phase, InlinePass::CGSCCInliner},
                                 UseInlineAdvisor, MaxDevirtIterations);
 
+  if (EnableAIEMetadataConversion)
+    MIWP.addModulePass(createModuleToFunctionPassAdaptor(AIEMetaData()));
+
   // Require the GlobalsAA analysis for the module so we can query it within
   // the CGSCC pipeline.
   if (EnableGlobalAnalyses) {
