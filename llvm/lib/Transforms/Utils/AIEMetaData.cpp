@@ -223,7 +223,12 @@ const SCEV *AIEMetaData::getSCEV() const {
   return nullptr;
 }
 
-const SCEV *AIEMetaData::getTruncInductionSCEV() const {
+bool fitstype(int MinItercount, const Type *T) {
+  return (uint64_t)MinItercount <
+         *APInt::getSignedMaxValue(T->getIntegerBitWidth()).getRawData();
+}
+
+const SCEV *AIEMetaData::getTruncInductionSCEV(int MinIterCount) const {
   const SCEV *S = nullptr;
 
   for (BasicBlock *BB : L->blocks()) {
@@ -251,8 +256,9 @@ const SCEV *AIEMetaData::getTruncInductionSCEV() const {
       if (const SCEVAddExpr *AR = dyn_cast<SCEVAddExpr>(SIntern)) {
         if (const SCEVZeroExtendExpr *Zext =
                 dyn_cast<SCEVZeroExtendExpr>(AR->getOperand(1))) {
-          if (const SCEVTruncateExpr *Trunc =
-                  dyn_cast<SCEVTruncateExpr>(Zext->getOperand(0))) {
+          const SCEVTruncateExpr *Trunc =
+              dyn_cast<SCEVTruncateExpr>(Zext->getOperand(0));
+          if (Trunc && fitstype(MinIterCount, Trunc->getType())) {
             const SCEV *OrigSCEV = Trunc->getOperand();
 
             if (const SCEVConstant *SCEVConst =
@@ -315,7 +321,7 @@ void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
   const SCEV *S = getSCEV();
 
   if (!S) {
-    S = getTruncInductionSCEV();
+    S = getTruncInductionSCEV(MinIterCount);
   }
 
   if (!S) {

@@ -1352,6 +1352,7 @@ for.end:                                          ; preds = %for.cond
   ret void
 }
 
+; find IV even if it is hidden in a truncation operation
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind memory(argmem: readwrite, inaccessiblemem: write)
 define dso_local void @basicIVTruncation(i32 noundef %num_elems, i32 noundef %n) local_unnamed_addr #0 {
 ; CHECK-LABEL: @basicIVTruncation(
@@ -1385,7 +1386,9 @@ for.body:                                         ; preds = %for.cond, %for.body
   br label %for.cond, !llvm.loop !6
 }
 
-
+; Only insert an assertion, if the header already contains the loop bounds Value.
+; Otherwise the IR is not correct and moving the loop Bounds into the header is 
+; not yet desired.
 ; Function Attrs: mustprogress noinline
 define  dso_local void @assume_insertion_only_in_correct_header(ptr nonnull align 32 dereferenceable(128) %params) {
 ; CHECK-LABEL: @assume_insertion_only_in_correct_header(
