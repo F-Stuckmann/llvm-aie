@@ -1104,6 +1104,10 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
         std::move(EarlyFPM), PTO.EagerlyInvalidateAnalyses));
   }
 
+  if (EnableAIEMetadataConversion)
+    MPM.addPass(createModuleToFunctionPassAdaptor(
+        createFunctionToLoopPassAdaptor(AIEMetaData())));
+
   if (LoadSampleProfile) {
     // Annotate sample profile right after early FPM to ensure freshness of
     // the debug info.
