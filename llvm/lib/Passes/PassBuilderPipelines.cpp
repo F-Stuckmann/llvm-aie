@@ -418,6 +418,9 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
 
   FunctionPassManager FPM;
 
+  if (EnableAIEMetadataConversion)
+    FPM.addPass(createFunctionToLoopPassAdaptor(AIEMetaData()));
+
   if (AreStatisticsEnabled())
     FPM.addPass(CountVisitsPass());
 
@@ -470,9 +473,6 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   // TODO: Investigate promotion cap for O1.
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
-
-  if (EnableAIEMetadataConversion)
-    LPM1.addPass(AIEMetaData());
 
   LPM1.addPass(LoopRotatePass(
       /* Disable header duplication */ true, isLTOPreLink(Phase)));
@@ -567,6 +567,9 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
 
   FunctionPassManager FPM;
 
+  if (EnableAIEMetadataConversion)
+    FPM.addPass(createFunctionToLoopPassAdaptor(AIEMetaData()));
+
   if (AreStatisticsEnabled())
     FPM.addPass(CountVisitsPass());
 
@@ -654,9 +657,6 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   // TODO: Investigate promotion cap for O1.
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
-
-  if (EnableAIEMetadataConversion)
-    LPM1.addPass(AIEMetaData());
 
   // Disable header duplication in loop rotation at -Oz.
   LPM1.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
@@ -923,8 +923,10 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
                                 InlineContext{Phase, InlinePass::CGSCCInliner},
                                 UseInlineAdvisor, MaxDevirtIterations);
 
+  // inlining metadata processing
   if (EnableAIEMetadataConversion)
-    MIWP.addModulePass(createModuleToFunctionPassAdaptor(AIEMetaData()));
+    MIWP.addModulePass(createModuleToFunctionPassAdaptor(
+        createFunctionToLoopPassAdaptor(AIEMetaData())));
 
   // Require the GlobalsAA analysis for the module so we can query it within
   // the CGSCC pipeline.
@@ -1369,6 +1371,10 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   const bool LTOPreLink = isLTOPreLink(LTOPhase);
   ModulePassManager MPM;
 
+  if (EnableAIEMetadataConversion)
+    MPM.addPass(createModuleToFunctionPassAdaptor(
+        createFunctionToLoopPassAdaptor(AIEMetaData())));
+
   // Run partial inlining pass to partially inline functions that have
   // large bodies.
   if (RunPartialInlining)
@@ -1462,8 +1468,6 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   invokeVectorizerStartEPCallbacks(OptimizePM, Level);
 
   LoopPassManager LPM;
-  if (EnableAIEMetadataConversion)
-    LPM.addPass(AIEMetaData());
 
   // First rotate loops that may have been un-rotated by prior passes.
   // Disable header duplication at -Oz.

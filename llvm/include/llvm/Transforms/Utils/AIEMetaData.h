@@ -48,8 +48,6 @@ public:
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
 
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
-
   static bool isRequired() { return true; }
 };
 

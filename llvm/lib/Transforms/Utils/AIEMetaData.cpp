@@ -30,24 +30,6 @@ bool AIEMetaData::hasAssumption(Value *Header) {
   return false;
 }
 
-PreservedAnalyses AIEMetaData::run(Function &F, FunctionAnalysisManager &FAM) {
-  LoopInfo *LI = &FAM.getResult<LoopAnalysis>(F);
-  SE = &FAM.getResult<ScalarEvolutionAnalysis>(F);
-  if (!SE) {
-    dbgs() << "Could not get SE!\n";
-    return PreservedAnalyses::all();
-  }
-
-  AC = &FAM.getResult<AssumptionAnalysis>(F);
-  DT = &FAM.getResult<DominatorTreeAnalysis>(F);
-
-  for (auto L : *LI) {
-    extractMetaData(*L);
-  }
-
-  return PreservedAnalyses::all();
-}
-
 PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
                                    LoopStandardAnalysisResults &AR,
                                    LPMUpdater &U) {
