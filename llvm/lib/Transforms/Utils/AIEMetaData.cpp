@@ -102,8 +102,10 @@ bool AIEMetaData::isIncrement(const SCEV *S) {
   return Increment;
 }
 
-Value *AIEMetaData::calcMinValue(const SCEV *S, int MinIterCount,
-                                 LLVMContext *Context) {
+// Value *AIEMetaData::getMinBound()
+
+Value *AIEMetaData::calcMinLoopIter(const SCEV *S, int MinIterCount,
+                                    LLVMContext *Context) {
   // get start point
 
   // increment it by
@@ -159,7 +161,31 @@ Value *getMaxBoundryDec(const SCEV *S) {
   }
 }
 
-Value *AIEMetaData::getMaxBoundry() const {
+Value *AIEMetaData::getValue(Value *V) {
+  if (PHINode *MaxPHI = dyn_cast_or_null<PHINode>(V)) {
+    // Is a function argument, no need to check domination relationship
+    if (!isa<Instruction>(MaxPHI->getOperand(0))) {
+      return MaxPHI->getOperand(0);
+    }
+    // Is a function argument, no need to check domination relationship
+    if (!isa<Instruction>(MaxPHI->getOperand(1))) {
+      return MaxPHI->getOperand(1);
+    }
+    // Check if the Op0 is from a previous block, then this is the correct value
+    if (DT->dominates(dyn_cast<Instruction>(MaxPHI->getOperand(0))->getParent(),
+                      L->getHeader())) {
+      return MaxPHI->getOperand(0);
+    }
+    if (DT->dominates(dyn_cast<Instruction>(MaxPHI->getOperand(1))->getParent(),
+                      L->getHeader())) {
+      return MaxPHI->getOperand(1);
+    }
+    return nullptr;
+  }
+  return V;
+}
+
+Value *AIEMetaData::getBoundries() {
 
   BranchInst *BI = dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator());
   if (!BI || !BI->isConditional()) {
@@ -174,21 +200,36 @@ Value *AIEMetaData::getMaxBoundry() const {
     assert(false && "Loop exit condition is not an integer comparison.\n");
   }
 
-  Value *InductionVar;
-  for (uint I = 0; I < ICmp->getNumOperands(); I++) {
-    if (ICmp->getOperand(I) != InductionVar)
-      InductionVar = ICmp->getOperand(I);
-  }
+  CmpInst::Predicate Pred = ICmp->getPredicate();
+  Value *Op0 = ICmp->getOperand(0);
+  Value *Op1 = ICmp->getOperand(1);
+  if (ICmpInst::isLT(Pred)) {
+    MinValue = getValue(Op0);
+    MaxBoundry = getValue(Op1);
+  } else if (Pred == CmpInst::Predicate::ICMP_EQ) {
+    // assume the upper loop bound does not change, so that the max bound has no
+    // SCEV.
+    if (SE->isSCEVable(Op0->getType()) && SE->getExistingSCEV(Op0) &&
+        SE->isSCEVable(Op1->getType()) && SE->getExistingSCEV(Op1)) {
+      MinValue = nullptr;
+      MaxBoundry = nullptr;
+    }
+    if (SE->isSCEVable(Op0->getType()) && SE->getExistingSCEV(Op0)) {
+      MinValue = getValue(Op0);
+      MaxBoundry = getValue(Op1);
+    } else {
+      MinValue = getValue(Op1);
+      MaxBoundry = getValue(Op0);
+    }
 
-  if (!InductionVar) {
-    LLVM_DEBUG(
-        dbgs() << "Induction variable not found in loop exit condition.\n";
-        L->getHeader()->dump(); dbgs() << "\n"; BI->dump());
-    return nullptr; // assert(false && "Induction variable not found in loop
-                    // exit condition.\n");
+  } else {
+    MinValue = getValue(Op0);
+    MaxBoundry = getValue(Op1);
   }
+  LLVM_DEBUG(dbgs() << "MinValue = "; MinValue->dump());
+  LLVM_DEBUG(dbgs() << "MaxValue = "; MaxBoundry->dump());
 
-  return InductionVar;
+  return MaxBoundry;
 }
 
 const SCEV *AIEMetaData::getSCEV() const {
@@ -314,17 +355,12 @@ void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
     return;
   }
   isIncrement(S);
-  Value *MinValue = calcMinValue(S, MinIterCount, Context);
-  if (!MinValue) {
+  Value *MinIterValue = calcMinLoopIter(S, MinIterCount, Context);
+  if (!MinIterValue) {
     return;
   }
 
-  Value *MaxBoundry = nullptr;
-  if (Increment) {
-    MaxBoundry = getMaxBoundry();
-  } else {
-    MaxBoundry = getMaxBoundryDec(S);
-  }
+  getBoundries();
 
   if (!MaxBoundry) {
     LLVM_DEBUG(dbgs() << "AIEMetadata-Warning: Could not find Iteration "
@@ -351,24 +387,24 @@ void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
     return;
   }
 
-  LLVM_DEBUG(dbgs() << "Minimum Value : "; MinValue->dump());
-  LLVM_DEBUG(dbgs() << "Max Value : "; MaxBoundry->dump());
+  LLVM_DEBUG(dbgs() << "Min IterationVAlue : "; MinIterValue->dump());
+  LLVM_DEBUG(dbgs() << "Max Value          : "; MaxBoundry->dump());
 
   IRBuilder<> Builder(L->getHeader()->getTerminator());
 
   Value *Cmp = nullptr;
   // ensure equalize types in the comparison
-  if (MaxBoundry->getType() != MinValue->getType()) {
-    if (MinValue->getType()->getScalarSizeInBits() <
+  if (MaxBoundry->getType() != MinIterValue->getType()) {
+    if (MinIterValue->getType()->getScalarSizeInBits() <
         MaxBoundry->getType()->getScalarSizeInBits()) {
-      MinValue = Builder.CreateSExt(MinValue, MaxBoundry->getType());
+      MinIterValue = Builder.CreateSExt(MinIterValue, MaxBoundry->getType());
     } else {
-      MaxBoundry = Builder.CreateSExt(MaxBoundry, MinValue->getType());
+      MaxBoundry = Builder.CreateSExt(MaxBoundry, MinIterValue->getType());
     }
   }
-  Cmp = Builder.CreateICmpSGT(MaxBoundry, MinValue);
+  Cmp = Builder.CreateICmpSGT(MaxBoundry, MinIterValue);
 
-  LLVM_DEBUG(dbgs() << "Inserting Condition:"; MinValue->dump();
+  LLVM_DEBUG(dbgs() << "Inserting Condition:"; MinIterValue->dump();
              dbgs() << "With Comparator:"; Cmp->dump());
 
   // Insert the `llvm.assume` Call

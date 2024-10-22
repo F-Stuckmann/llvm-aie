@@ -31,13 +31,18 @@ private:
   Instruction *LoopBound1;
   bool Increment;
 
+  Value *MinValue;
+  Value *MaxBoundry;
+
   bool extractMetaData(Loop &L);
 
   void addAssumeToLoopHeader(uint64_t MinIterCount, LLVMContext *Context);
 
-  Value *getMaxBoundry() const;
+  Value *getBoundries();
   bool isIncrement(const SCEV *S);
-  Value *calcMinValue(const SCEV *S, int MinIterCount, LLVMContext *Context);
+  Value *calcMinLoopIter(const SCEV *S, int MinIterCount, LLVMContext *Context);
+
+  Value *getValue(Value *V);
 
   bool hasAssumption(Value *Header);
 
