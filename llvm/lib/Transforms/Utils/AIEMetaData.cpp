@@ -40,6 +40,12 @@ PreservedAnalyses AIEMetaData::run(Loop &L, LoopAnalysisManager &AM,
   return PreservedAnalyses::all();
 }
 
+// check loop rotation conditions from
+bool isRotatable(const Loop *L) {
+  BranchInst *BI = dyn_cast<BranchInst>(L->getHeader()->getTerminator());
+  return L->isLoopExiting(L->getHeader()) && (BI && BI->isConditional());
+}
+
 bool AIEMetaData::extractMetaData(Loop &L) {
   this->L = &L;
   Context = &L.getHeader()->getParent()->getContext();
@@ -56,18 +62,14 @@ bool AIEMetaData::extractMetaData(Loop &L) {
   LLVM_DEBUG(dbgs() << "\n");
 
   if (MinIterCount.has_value() && MinIterCount.value() > 0) {
-    LLVM_DEBUG(dbgs() << "Processing Loop Metadata of "
-                      << L.getHeader()->getParent()->getName() << " "
-                      << L.getName() << " (" << MinIterCount.value() << ")\n");
 
-    // Fixme: properly check if the Header already has an assumption.
-    //  only
-    // if (hasAssumption(L.getHeader())) {
-    //   LLVM_DEBUG(dbgs() << "Assumption for Header " <<
-    //   L.getHeader()->getName()
-    //                     << "\n");
-    //   return false;
-    // }
+    if (!isRotatable(this->L)) {
+      LLVM_DEBUG(dbgs() << "Processing Loop Metadata: "
+                        << L.getHeader()->getParent()->getName() << " "
+                        << L.getName() << " (" << MinIterCount.value()
+                        << ")\nAborting Metadata due to not rotatable!\n");
+      return false;
+    }
 
     LLVM_DEBUG(L.getHeader()->getParent()->dump(););
 
@@ -286,7 +288,7 @@ const SCEV *AIEMetaData::getTruncInductionSCEV(int MinIterCount) const {
 // Function to add an assume in the loop Header
 void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
                                         LLVMContext *Context) {
-  LLVM_DEBUG(dbgs() << "Processing Loop Metadata (Result) of "
+  LLVM_DEBUG(dbgs() << "Processing Loop Metadata: "
                     << L->getHeader()->getParent()->getName() << " "
                     << L->getName() << " (" << MinIterCount << ")\n");
 
@@ -355,6 +357,7 @@ void AIEMetaData::addAssumeToLoopHeader(uint64_t MinIterCount,
   IRBuilder<> Builder(L->getHeader()->getTerminator());
 
   Value *Cmp = nullptr;
+  // ensure equalize types in the comparison
   if (MaxBoundry->getType() != MinValue->getType()) {
     if (MinValue->getType()->getScalarSizeInBits() <
         MaxBoundry->getType()->getScalarSizeInBits()) {

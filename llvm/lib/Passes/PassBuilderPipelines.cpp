@@ -474,6 +474,9 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
+  if (EnableAIEMetadataConversion)
+    LPM1.addPass(AIEMetaData());
+
   LPM1.addPass(LoopRotatePass(
       /* Disable header duplication */ true, isLTOPreLink(Phase)));
   // TODO: Investigate promotion cap for O1.

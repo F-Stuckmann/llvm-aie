@@ -1387,7 +1387,7 @@ for.body:                                         ; preds = %for.cond, %for.body
 }
 
 ; Only insert an assertion, if the header already contains the loop bounds Value.
-; Otherwise the IR is not correct and moving the loop Bounds into the header is 
+; Otherwise the IR is not correct and moving the loop Bounds into the header is
 ; not yet desired.
 ; Function Attrs: mustprogress noinline
 define  dso_local void @assume_insertion_only_in_correct_header(ptr nonnull align 32 dereferenceable(128) %params) {
@@ -1441,29 +1441,97 @@ for.body11:                                       ; preds = %for.body, %for.body
   br i1 %exitcond.not, label %for.cond8.for.cond.cleanup10_crit_edge, label %for.body11, !llvm.loop !6
 }
 
+; Check Loop Rotation abort Condition: Loop Exit is not the header, i.e. already rotated
 ; Function Attrs: mustprogress noinline
-define  dso_local void @regression(ptr nonnull align 32 dereferenceable(64) %params) {
-for.body.lr.ph:
+define  dso_local void @header_is_loop_exit(ptr nonnull align 32 dereferenceable(64) %params) {
+; CHECK-LABEL: @header_is_loop_exit(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[PARAMS:%.*]], align 32
+; CHECK-NEXT:    [[DIV7:%.*]] = lshr i32 [[TMP0]], 6
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.cond.cleanup:
+; CHECK-NEXT:    ret void
+; CHECK:       for.body:
+; CHECK-NEXT:    [[I_014:%.*]] = phi i32 [ 0, [[ENTRY:%.*]] ], [ [[ADD:%.*]], [[FOR_BODY_EXIT:%.*]] ]
+; CHECK-NEXT:    [[OP_PARAMS_I_I_I:%.*]] = getelementptr inbounds i8, ptr [[PARAMS]], i20 32
+; CHECK-NEXT:    [[TMP1:%.*]] = load i8, ptr [[OP_PARAMS_I_I_I]], align 32
+; CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i8 [[TMP1]], -1
+; CHECK-NEXT:    [[TMP2:%.*]] = tail call i1 @llvm.is.constant.i1(i1 [[CMP3]])
+; CHECK-NEXT:    [[TMP3:%.*]] = and i1 [[CMP3]], [[TMP2]]
+; CHECK-NEXT:    br i1 [[TMP3]], label [[FOR_BODY_EXIT]], label [[IF_END_I_I_I_I:%.*]]
+; CHECK:       if.end.i.i.i.i:
+; CHECK-NEXT:    br label [[FOR_BODY_EXIT]]
+; CHECK:       for.body.exit:
+; CHECK-NEXT:    [[ADD]] = add nuw nsw i32 [[I_014]], 1
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 [[ADD]], [[DIV7]]
+; CHECK-NEXT:    br i1 [[CMP2]], label [[FOR_BODY]], label [[FOR_COND_CLEANUP:%.*]], !llvm.loop [[LOOP4]]
+;
+entry:
   %0 = load i32, ptr %params, align 32
   %div7 = lshr i32 %0, 6
-  %cmp = icmp ugt i32 %0, 511
-  tail call void @llvm.assume(i1 %cmp)
   br label %for.body
 
 for.cond.cleanup:
   ret void
 
 for.body:
-  %i.014 = phi i32 [ 0, %for.body.lr.ph ], [ %add, %exit ]
-  br label %if.end.i.i.i.i
+  %i.014 = phi i32 [ 0, %entry ], [ %add, %for.body.exit ]
+  %op_params.i.i.i = getelementptr inbounds i8, ptr %params, i20 32
+  %3 = load i8, ptr %op_params.i.i.i, align 32
+  %cmp3 = icmp eq i8 %3, -1
+  %4 = tail call i1 @llvm.is.constant.i1(i1 %cmp3)
+  %5 = and i1 %cmp3, %4
+  br i1 %5, label %for.body.exit, label %if.end.i.i.i.i
 
 if.end.i.i.i.i:
-  br label %exit
+  br label %for.body.exit
 
-exit: ; preds = %if.end.i.i.i.i
+for.body.exit:
   %add = add nuw nsw i32 %i.014, 1
-  %exitcond.not = icmp eq i32 %add, %div7
-  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body, !llvm.loop !2960
+  %cmp2 = icmp ult i32 %add, %div7
+  br i1 %cmp2, label %for.body, label %for.cond.cleanup, !llvm.loop !6
+}
+
+; Header has unconditional branch, abort Loop rotataion and metadata adding
+; Function Attrs: mustprogress noinline
+define  dso_local void @header_unconditional(ptr nonnull align 32 dereferenceable(64) %params) {
+; CHECK-LABEL: @header_unconditional(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, ptr [[PARAMS:%.*]], align 32
+; CHECK-NEXT:    [[DIV7:%.*]] = lshr i32 [[TMP0]], 6
+; CHECK-NEXT:    [[CMP211:%.*]] = icmp ult i32 0, [[DIV7]]
+; CHECK-NEXT:    br i1 [[CMP211]], label [[FOR_BODY_PREHEADER:%.*]], label [[FOR_COND_CLEANUP:%.*]]
+; CHECK:       for.body.preheader:
+; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
+; CHECK:       for.cond.cleanup.loopexit:
+; CHECK-NEXT:    br label [[FOR_COND_CLEANUP]]
+; CHECK:       for.cond.cleanup:
+; CHECK-NEXT:    ret void
+; CHECK:       for.body:
+; CHECK-NEXT:    [[I_014:%.*]] = phi i32 [ [[ADD:%.*]], [[FOR_BODY_EXIT:%.*]] ], [ 0, [[FOR_BODY_PREHEADER]] ]
+; CHECK-NEXT:    br label [[FOR_BODY_EXIT]]
+; CHECK:       for.body.exit:
+; CHECK-NEXT:    [[ADD]] = add nuw nsw i32 [[I_014]], 1
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 [[ADD]], [[DIV7]]
+; CHECK-NEXT:    br i1 [[CMP2]], label [[FOR_BODY]], label [[FOR_COND_CLEANUP_LOOPEXIT:%.*]], !llvm.loop [[LOOP4]]
+;
+entry:
+  %0 = load i32, ptr %params, align 32
+  %div7 = lshr i32 %0, 6
+  %cmp211 = icmp ult i32 0, %div7
+  br i1 %cmp211, label %for.body, label %for.cond.cleanup
+
+for.cond.cleanup:
+  ret void
+
+for.body:
+  %i.014 = phi i32 [ 0, %entry ], [ %add, %for.body.exit ]
+  br label %for.body.exit
+
+for.body.exit:
+  %add = add nuw nsw i32 %i.014, 1
+  %cmp2 = icmp ult i32 %add, %div7
+  br i1 %cmp2, label %for.body, label %for.cond.cleanup, !llvm.loop !6
 }
 
 !2 = distinct !{!2, !7, !8, !9}

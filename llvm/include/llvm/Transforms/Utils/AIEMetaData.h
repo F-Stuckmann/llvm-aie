@@ -41,7 +41,7 @@ private:
 
   bool hasAssumption(Value *Header);
 
-  const SCEV *getTruncInductionSCEV() const;
+  const SCEV *getTruncInductionSCEV(int MinIterCount) const;
   const SCEV *getSCEV() const;
 
 public:
