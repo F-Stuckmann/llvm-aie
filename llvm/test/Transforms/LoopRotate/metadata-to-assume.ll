@@ -9,7 +9,7 @@
 ; unit test for the WAW register renaming pass and check edge cases
 ; RUN: opt -S -passes='aie-metadata,loop-rotate' < %s | FileCheck %s
 
-
+; for loop where loop counter is incremented by +1 and starts at 0
 ; Function Attrs: mustprogress noinline nounwind optnone
 define dso_local void @_Z9incrementPii(ptr %ptr, i32 noundef %n) #0 {
 ; CHECK-LABEL: @_Z9incrementPii(
@@ -87,6 +87,7 @@ for.end:                                          ; preds = %for.cond
   ret void
 }
 
+; for loop where loop counter is incremented by +7 and starts at 0
 ; Function Attrs: mustprogress noinline nounwind optnone
 define dso_local void @_Z18increment_multiplePii(ptr %ptr, i32 noundef %n) #0 {
 ; CHECK-LABEL: @_Z18increment_multiplePii(
