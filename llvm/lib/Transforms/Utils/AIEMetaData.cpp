@@ -163,12 +163,13 @@ Value *getMaxBoundryDec(const SCEV *S) {
 
 Value *AIEMetaData::getValue(Value *V) {
   if (PHINode *MaxPHI = dyn_cast_or_null<PHINode>(V)) {
+    bool HasSecondOp = MaxPHI->getNumOperands() > 1;
     // Is a function argument, no need to check domination relationship
     if (!isa<Instruction>(MaxPHI->getOperand(0))) {
       return MaxPHI->getOperand(0);
     }
     // Is a function argument, no need to check domination relationship
-    if (!isa<Instruction>(MaxPHI->getOperand(1))) {
+    if (HasSecondOp && !isa<Instruction>(MaxPHI->getOperand(1))) {
       return MaxPHI->getOperand(1);
     }
     // Check if the Op0 is from a previous block, then this is the correct value
@@ -176,7 +177,8 @@ Value *AIEMetaData::getValue(Value *V) {
                       L->getHeader())) {
       return MaxPHI->getOperand(0);
     }
-    if (DT->dominates(dyn_cast<Instruction>(MaxPHI->getOperand(1))->getParent(),
+    if (HasSecondOp &&
+        DT->dominates(dyn_cast<Instruction>(MaxPHI->getOperand(1))->getParent(),
                       L->getHeader())) {
       return MaxPHI->getOperand(1);
     }
