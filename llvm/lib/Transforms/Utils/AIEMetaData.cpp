@@ -225,8 +225,8 @@ Value *AIEMetaData::getBoundries() {
     }
 
   } else {
-    MinValue = getValue(Op0);
-    MaxBoundry = getValue(Op1);
+    MinValue = getValue(Op1);
+    MaxBoundry = getValue(Op0);
   }
   LLVM_DEBUG(dbgs() << "MinValue = "; MinValue->dump());
   LLVM_DEBUG(dbgs() << "MaxValue = "; MaxBoundry->dump());
