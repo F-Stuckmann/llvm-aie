@@ -661,6 +661,9 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/false));
 
+  if (EnableAIEMetadataConversion)
+    LPM1.addPass(AIEMetaData());
+
   // Disable header duplication in loop rotation at -Oz.
   LPM1.addPass(LoopRotatePass(EnableLoopHeaderDuplication ||
                                   Level != OptimizationLevel::Oz,
@@ -849,6 +852,8 @@ void PassBuilder::addPGOInstrPasses(ModulePassManager &MPM,
   MPM.addPass(PGOInstrumentationGen(IsCS));
 
   if (EnablePostPGOLoopRotation) {
+    MPM.addPass(createModuleToFunctionPassAdaptor(
+        createFunctionToLoopPassAdaptor(AIEMetaData())));
     // Disable header duplication in loop rotation at -Oz.
     MPM.addPass(createModuleToFunctionPassAdaptor(
         createFunctionToLoopPassAdaptor(
@@ -1475,6 +1480,9 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   invokeVectorizerStartEPCallbacks(OptimizePM, Level);
 
   LoopPassManager LPM;
+
+  if (EnableAIEMetadataConversion)
+    LPM.addPass(AIEMetaData());
 
   // First rotate loops that may have been un-rotated by prior passes.
   // Disable header duplication at -Oz.
