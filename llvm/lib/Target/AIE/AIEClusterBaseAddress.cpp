@@ -83,6 +83,12 @@ static cl::opt<bool> EnableInputPtrRestore(
     cl::desc(
         "Enable restoring pointer in case of usage across multiple MBBs."));
 
+static cl::opt<bool>
+    DetachCondLoadChain("aie-chain-addr-detach-cond-load-jump", cl::Hidden,
+                        cl::init(true),
+                        cl::desc("Disable ptradd chaining that feed "
+                                 "loads that are used in conditional jumps."));
+
 namespace {
 
 LLT getLoadStoreType(const MachineInstr &MI, const MachineRegisterInfo &MRI) {
@@ -348,6 +354,21 @@ private:
   bool replaceReg(MachineInstr &MI, Register OldReg, Register NewReg,
                   GISelObserverWrapper &Observer);
 
+  /// Return a set of Load Instructions whose results are used in the path of
+  /// the conditional branch of \p MBB .
+  std::set<MachineInstr *>
+  getLoadsFeedingCondBranch(MachineBasicBlock &MBB) const;
+
+  /// \return whether PtrAdd is used in a Load Instruction that feeds a
+  /// Conditional Jump.
+  /// Example:
+  /// %1 = G_PTR_ADD %0, xx
+  /// %2 = G_LOAD %1
+  /// %3 = G_ICMP %2, xx
+  /// G_BRCOND %3
+  bool isPtrAddUsedByLoadBranchCondition(
+      MachineInstr *PtrAdd, std::set<MachineInstr *> &LoadsFeedingCondBranch);
+
   /// \return Phi Node in \p MBB that uses the Old Ptr Reg
   GPhi *findOldPtrRegPhi(MachineBasicBlock &MBB);
 
@@ -507,10 +528,22 @@ bool AIEClusterBaseAddress::processBasicBlock(MachineBasicBlock &MBB,
 
 AIEClusterBaseAddress::RegUseMap
 AIEClusterBaseAddress::collectPtrUses(MachineBasicBlock &MBB) {
+  // Initialize Load cond Branch
+  std::set<MachineInstr *> LoadsFeedingCondBranch;
+  if (DetachCondLoadChain)
+    LoadsFeedingCondBranch = getLoadsFeedingCondBranch(MBB);
+
   RegUseMap RegAndUses;
   for (MachineInstr &MI : MBB) {
     // Only consider G_PTR_ADDs
     if (MI.getOpcode() != TargetOpcode::G_PTR_ADD)
+      continue;
+
+    // If G_PTR_ADDs feeds a conditional branch through a load instruction,
+    // ignore PtrAdd in chain collection. Otherwise the load will be placed last
+    // in a postinc chain and thus delay the conditional branch decision.
+    if (!LoadsFeedingCondBranch.empty() &&
+        isPtrAddUsedByLoadBranchCondition(&MI, LoadsFeedingCondBranch))
       continue;
 
     RegAndUses[MI.getOperand(1).getReg()].push_back(&MI);
@@ -527,6 +560,73 @@ bool AIEClusterBaseAddress::shouldSkipChaining(
     return true;
 
   return false;
+}
+
+/// Recursively search bottom up for Load instrs in the use chain of \p MI .
+/// Stop the search when Exiting \p MBB .  The first time this function is
+/// called, \p MI should be a conditional branch instruction. Return all found
+/// Load MachineInstr in
+/// \p LoadsFeedingInstrs .
+void findLoadsFeedingInstr(MachineInstr &MI, MachineBasicBlock *MBB,
+                           std::set<MachineInstr *> &LoadsFeedingInstrs,
+                           MachineRegisterInfo &MRI) {
+  for (MachineOperand &MO : MI.uses()) {
+    if (!MO.isReg())
+      continue;
+
+    Register UseReg = MO.getReg();
+    if (!UseReg.isVirtual())
+      continue;
+
+    auto *UseMI = MRI.getUniqueVRegDef(UseReg);
+    if (!UseMI)
+      continue;
+
+    if (UseMI->getParent() != MBB || UseMI->isPHI())
+      continue;
+
+    if (UseMI->mayLoad()) {
+      LoadsFeedingInstrs.emplace(UseMI);
+      LLVM_DEBUG(dbgs() << "Found Feeding Load " << *UseMI);
+    }
+
+    findLoadsFeedingInstr(*UseMI, MBB, LoadsFeedingInstrs, MRI);
+  }
+}
+
+std::set<MachineInstr *>
+AIEClusterBaseAddress::getLoadsFeedingCondBranch(MachineBasicBlock &MBB) const {
+  assert(MRI);
+  std::set<MachineInstr *> LoadsFeedingCondBranch;
+  for (auto &MI : make_range(MBB.getFirstTerminator(), MBB.end())) {
+    if (MI.isConditionalBranch()) {
+      findLoadsFeedingInstr(MI, &MBB, LoadsFeedingCondBranch, *MRI);
+      break;
+    }
+  }
+
+  return LoadsFeedingCondBranch;
+}
+
+bool AIEClusterBaseAddress::isPtrAddUsedByLoadBranchCondition(
+    MachineInstr *PtrAdd, std::set<MachineInstr *> &LoadsFeedingCondBranch) {
+  assert(PtrAdd->getOpcode() == TargetOpcode::G_PTR_ADD);
+
+  // Is G_PTR_ADD feeding a Load instruction?
+  const Register DefReg = PtrAdd->getOperand(0).getReg();
+  if (MRI->use_nodbg_empty(DefReg))
+    return false;
+
+  auto UseBegin = MRI->use_instr_nodbg_begin(DefReg);
+  MachineInstr *LoadMI = &*UseBegin;
+  if (!LoadMI->mayLoad())
+    return false;
+
+  const bool LoadFeedCondBranch = LoadsFeedingCondBranch.count(LoadMI);
+  LLVM_DEBUG(if (LoadFeedCondBranch) dbgs()
+                 << "Found Load feeding Cond Branch attached to " << *PtrAdd;);
+
+  return LoadFeedCondBranch;
 }
 
 GPhi *AIEClusterBaseAddress::findOldPtrRegPhi(MachineBasicBlock &MBB) {
