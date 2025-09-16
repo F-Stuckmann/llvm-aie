@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its affiliates
+# (c) Copyright 2023-2025 Advanced Micro Devices, Inc. or its affiliates
 # RUN: llc -mtriple aie2 -run-pass=aie-cluster-base-address --aie-chain-addr-vec-ldst --aie-chain-addr-scl-ldst=false %s -verify-machineinstrs -o - | FileCheck %s
 
 # In this test, we chain the ptradds until we reach a store, then break the chain
@@ -238,6 +238,8 @@ body:             |
 # chaining opportunities are not missed in the current MBB.
 ---
 name:            loads_stores_2BBs
+legalized: true
+tracksRegLiveness: true
 body:             |
   ; CHECK-LABEL: name: loads_stores_2BBs
   ; CHECK: bb.0.entry:
@@ -249,31 +251,36 @@ body:             |
   ; CHECK-NEXT:   [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
   ; CHECK-NEXT:   [[C2:%[0-9]+]]:_(s20) = G_CONSTANT i20 5
   ; CHECK-NEXT:   [[PTR_ADD:%[0-9]+]]:_(p0) = G_PTR_ADD [[COPY]], [[C2]](s20)
+  ; CHECK-NEXT:   [[C3:%[0-9]+]]:_(s20) = G_CONSTANT i20 -5
+  ; CHECK-NEXT:   [[PTR_ADD1:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD]], [[C3]](s20)
   ; CHECK-NEXT:   [[LOAD:%[0-9]+]]:_(s32) = G_LOAD [[PTR_ADD]](p0) :: (load (s32))
   ; CHECK-NEXT:   [[ADD:%[0-9]+]]:_(s32) = G_ADD [[LOAD]], [[C]]
   ; CHECK-NEXT:   G_STORE [[ADD]](s32), [[PTR_ADD]](p0) :: (store (s32))
-  ; CHECK-NEXT:   [[C3:%[0-9]+]]:_(s20) = G_CONSTANT i20 4
-  ; CHECK-NEXT:   [[PTR_ADD1:%[0-9]+]]:_(p0) = G_PTR_ADD [[COPY]], [[C3]](s20)
-  ; CHECK-NEXT:   [[LOAD1:%[0-9]+]]:_(s32) = G_LOAD [[PTR_ADD1]](p0) :: (load (s32))
-  ; CHECK-NEXT:   [[C4:%[0-9]+]]:_(s32) = G_CONSTANT i32 255
-  ; CHECK-NEXT:   [[AND:%[0-9]+]]:_(s32) = G_AND [[LOAD1]], [[C4]]
+  ; CHECK-NEXT:   [[C4:%[0-9]+]]:_(s20) = G_CONSTANT i20 4
+  ; CHECK-NEXT:   [[PTR_ADD2:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD1]], [[C4]](s20)
+  ; CHECK-NEXT:   [[C5:%[0-9]+]]:_(s20) = G_CONSTANT i20 -4
+  ; CHECK-NEXT:   [[PTR_ADD3:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD2]], [[C5]](s20)
+  ; CHECK-NEXT:   [[LOAD1:%[0-9]+]]:_(s32) = G_LOAD [[PTR_ADD2]](p0) :: (load (s32))
+  ; CHECK-NEXT:   [[C6:%[0-9]+]]:_(s32) = G_CONSTANT i32 255
+  ; CHECK-NEXT:   [[AND:%[0-9]+]]:_(s32) = G_AND [[LOAD1]], [[C6]]
   ; CHECK-NEXT:   G_BR %bb.1
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.1:
   ; CHECK-NEXT:   successors: %bb.1(0x80000000)
   ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[C5:%[0-9]+]]:_(s20) = G_CONSTANT i20 19
-  ; CHECK-NEXT:   [[PTR_ADD2:%[0-9]+]]:_(p0) = G_PTR_ADD [[COPY]], [[C5]](s20)
-  ; CHECK-NEXT:   [[LOAD2:%[0-9]+]]:_(<16 x s32>) = G_LOAD [[PTR_ADD1]](p0) :: (load (<16 x s32>))
-  ; CHECK-NEXT:   G_STORE [[LOAD2]](<16 x s32>), [[PTR_ADD2]](p0) :: (store (<16 x s32>))
-  ; CHECK-NEXT:   [[C6:%[0-9]+]]:_(s20) = G_CONSTANT i20 20
-  ; CHECK-NEXT:   [[C7:%[0-9]+]]:_(s20) = G_CONSTANT i20 1
-  ; CHECK-NEXT:   [[PTR_ADD3:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD2]], [[C7]](s20)
-  ; CHECK-NEXT:   G_STORE [[LOAD2]](<16 x s32>), [[PTR_ADD3]](p0) :: (store (<16 x s32>))
-  ; CHECK-NEXT:   [[C8:%[0-9]+]]:_(s20) = G_CONSTANT i20 12
-  ; CHECK-NEXT:   [[C9:%[0-9]+]]:_(s20) = G_CONSTANT i20 -8
-  ; CHECK-NEXT:   [[PTR_ADD4:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD3]], [[C9]](s20)
+  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:_(p0) = G_PHI [[PTR_ADD3]](p0), %bb.0, [[PHI]](p0), %bb.1
+  ; CHECK-NEXT:   [[C7:%[0-9]+]]:_(s20) = G_CONSTANT i20 19
+  ; CHECK-NEXT:   [[PTR_ADD4:%[0-9]+]]:_(p0) = G_PTR_ADD [[PHI]], [[C7]](s20)
+  ; CHECK-NEXT:   [[LOAD2:%[0-9]+]]:_(<16 x s32>) = G_LOAD [[PTR_ADD2]](p0) :: (load (<16 x s32>))
   ; CHECK-NEXT:   G_STORE [[LOAD2]](<16 x s32>), [[PTR_ADD4]](p0) :: (store (<16 x s32>))
+  ; CHECK-NEXT:   [[C8:%[0-9]+]]:_(s20) = G_CONSTANT i20 20
+  ; CHECK-NEXT:   [[C9:%[0-9]+]]:_(s20) = G_CONSTANT i20 1
+  ; CHECK-NEXT:   [[PTR_ADD5:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD4]], [[C9]](s20)
+  ; CHECK-NEXT:   G_STORE [[LOAD2]](<16 x s32>), [[PTR_ADD5]](p0) :: (store (<16 x s32>))
+  ; CHECK-NEXT:   [[C10:%[0-9]+]]:_(s20) = G_CONSTANT i20 12
+  ; CHECK-NEXT:   [[C11:%[0-9]+]]:_(s20) = G_CONSTANT i20 -8
+  ; CHECK-NEXT:   [[PTR_ADD6:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD5]], [[C11]](s20)
+  ; CHECK-NEXT:   G_STORE [[LOAD2]](<16 x s32>), [[PTR_ADD6]](p0) :: (store (<16 x s32>))
   ; CHECK-NEXT:   G_BR %bb.1
   bb.0.entry:
     liveins: $p3
