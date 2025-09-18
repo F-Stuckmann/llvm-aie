@@ -45,6 +45,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AIE.h"
+#include "Utils/AIELoopUtils.h"
 #include "llvm/CodeGen/GlobalISel/CSEInfo.h"
 #include "llvm/CodeGen/GlobalISel/CSEMIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
@@ -1153,7 +1154,7 @@ Register AIEClusterBaseAddress::restorePtrInMBB(
     GISelObserverWrapper &Observer) {
   assert(PtrAddMI.getOpcode() == TargetOpcode::G_PTR_ADD);
 
-  if (Offset == 0) {
+  if (Offset == 0 || AIELoopUtils::isSingleMBBLoop(PtrAddMI.getParent())) {
     LLVM_DEBUG(dbgs() << "bb." << PtrAddMI.getParent()->getNumber()
                       << " skipping, no Offset to restore\n");
     return 0;
