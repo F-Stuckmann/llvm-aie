@@ -4199,3 +4199,34 @@ bool llvm::matchSequentialStores(GStore &StMI, MachineRegisterInfo &MRI,
 
   return true;
 }
+
+/// This combiner replaces
+/// %1 = G_PTR_ADD %p0, 0
+/// with
+/// %1 = COPY %p0
+bool llvm::matchPtrAddZero(MachineInstr &MI, MachineRegisterInfo &MRI,
+                           GISelChangeObserver &Observer,
+                           BuildFnTy &MatchInfo) {
+  assert(MI.getOpcode() == TargetOpcode::G_PTR_ADD);
+
+  Register OffsetReg = MI.getOperand(2).getReg();
+  auto CstImm = getIConstantVRegValWithLookThrough(OffsetReg, MRI);
+  if (!CstImm)
+    return false;
+
+  if (CstImm->Value != 0)
+    return false;
+
+  // replace G_PTR_ADD with copy
+  MatchInfo = [=, &MI, &Observer](MachineIRBuilder &B) {
+    B.setInstr(MI);
+
+    Register SrcReg = MI.getOperand(1).getReg();
+    Register DstReg = MI.getOperand(0).getReg();
+
+    B.buildCopy(DstReg, SrcReg);
+
+    Observer.erasingInstr(MI);
+  };
+  return true;
+}

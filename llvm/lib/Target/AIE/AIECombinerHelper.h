@@ -298,6 +298,9 @@ bool matchPeelMemset(MachineInstr &MI, MachineRegisterInfo &MRI,
 
 bool matchSequentialStores(GStore &MI, MachineRegisterInfo &MRI,
                            GISelChangeObserver &Observer, BuildFnTy &MatchInfo);
+
+bool matchPtrAddZero(MachineInstr &MI, MachineRegisterInfo &MRI,
+                     GISelChangeObserver &Observer, BuildFnTy &MatchInfo);
 } // namespace llvm
 
 #endif

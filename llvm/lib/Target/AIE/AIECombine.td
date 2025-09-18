@@ -368,6 +368,11 @@ def combine_global_load_store_increment : GICombineRule <
           [{ return matchGlobalPtrModOptimizer(*${root}, MRI, Helper, B.getTII(), GlobalCombiners); }]),
   (apply [{ applyLdStInc(*${root}, MRI, Helper, B, Observer, GlobalCombiners); }] )>;
 
+def combine_ptradd_zero : GICombineRule<
+  (defs root:$root, build_fn_matchinfo:$matchinfo),
+  (match (wip_match_opcode G_PTR_ADD): $root,
+         [{ return matchPtrAddZero(*${root}, MRI, Observer, ${matchinfo}); }]),
+  (apply [{ Helper.applyBuildFn(*${root}, ${matchinfo}); }])>;
 
 
 def AIE2PostLegalizerCustomCombiner
@@ -381,6 +386,7 @@ def AIE2PostLegalizerCustomCombiner
                                                           combine_extract_concat,
                                                           combine_unmerge_concat,
                                                           combine_upd_to_concat, 
+                                                          combine_ptradd_zero,
                                                           ]> {
 }
 
@@ -391,6 +397,7 @@ def AIE2PPostLegalizerCustomCombiner
                                                             combine_offset_load_store_ptradd,
                                                             combine_offset_load_store_share_ptradd,
                                                             combine_add_vector_elt_undef,
+                                                            combine_ptradd_zero,
                                                              ]> {
 }
 
