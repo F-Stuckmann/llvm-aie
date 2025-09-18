@@ -89,6 +89,11 @@ static cl::opt<bool>
                         cl::desc("Disable ptradd chaining that feed "
                                  "loads that are used in conditional jumps."));
 
+static cl::opt<bool>
+    RestoreBrokenChains("aie-chain-addr-ptr-restore-broken-chain", cl::Hidden,
+                        cl::init(true),
+                        cl::desc("Restore Ptr if a Ptr Chain is broken."));
+
 namespace {
 
 LLT getLoadStoreType(const MachineInstr &MI, const MachineRegisterInfo &MRI) {
@@ -928,7 +933,7 @@ bool AIEClusterBaseAddress::buildChain(
     // (not constants) and desirable when we share pointers between
     // loads and stores (avoiding dependencies).
     if (shouldBreakChain(MI, MINext, TmpAccOffset, NewNextOffset)) {
-      if (RevertPtrAddressChanges) {
+      if (RevertPtrAddressChanges && RestoreBrokenChains) {
         LLVM_DEBUG(dbgs() << "Breaking Chain at " << *MI
                           << "New Chain starts with " << *MINext << "\n");
 
