@@ -760,7 +760,6 @@ bool AIEClusterBaseAddress::isPhiNeeded(MachineBasicBlock &MBB) {
     if (CurrentIncomingReg && *CurrentIncomingReg != IncomingReg)
       return true; // Multiple different Incoming Registers, ergo PHI needed.
 
-    if (!CurrentIncomingReg)
       CurrentIncomingReg = IncomingReg;
   }
   return false;
@@ -780,7 +779,7 @@ bool AIEClusterBaseAddress::createPhisForRegMapping(
     if (!isPhiNeeded(MBB)) {
       // Incoming values to MBB are equal, no Phi needed.
       const Register IncomingReg =
-          CurrentChainRegBlockMap.getNewReg((*MBB.pred_begin()));
+          CurrentChainRegBlockMap.getNewReg(*MBB.pred_begin());
       LLVM_DEBUG(dbgs() << "No need to Insert Phi in bb." << MBB.getNumber()
                         << " propagating " << printReg(IncomingReg)
                         << " to successors\n");
@@ -822,7 +821,7 @@ void AIEClusterBaseAddress::replaceRegs(MachineFunction &MF,
                                         GISelObserverWrapper &Observer) {
   LLVM_DEBUG(dbgs() << "Replace OldReg with NewReg in each MBB.\n");
   const Register OrigPtrReg = CurrentChainRegBlockMap.getOldReg();
-  for (auto [Idx, MBB] : enumerate(MF)) {
+  for (MachineBasicBlock &MBB : MF) {
     if (MBB.pred_empty())
       continue;
 
@@ -840,7 +839,7 @@ void AIEClusterBaseAddress::replaceRegs(MachineFunction &MF,
       continue;
     }
 
-    // Insert Phi node to combine incoming Registers.
+    // Insert/Find Phi node and update with incoming Registers.
     if (GPhi *Phi = findOldPtrRegPhi(MBB)) {
       // Not every MBB with multiple predecessors may have a phi node (e.g.
       // InputPtr was not modified by MBBs predecessors).

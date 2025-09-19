@@ -207,15 +207,13 @@ body:             |
   ; CHECK-NEXT:   successors: %bb.1(0x40000000), %bb.2(0x40000000)
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   %Idx:_(s32) = G_PHI %Inc(s32), %bb.1, [[C1]](s32), %bb.0
-  ; CHECK-NEXT:   %InPtr:_(p0) = G_PHI %24(p0), %bb.1, [[PTR_ADD2]](p0), %bb.0
+  ; CHECK-NEXT:   %InPtr:_(p0) = G_PHI %LoopPtrMod(p0), %bb.1, [[PTR_ADD2]](p0), %bb.0
   ; CHECK-NEXT:   [[C6:%[0-9]+]]:_(s20) = G_CONSTANT i20 19
   ; CHECK-NEXT:   [[PTR_ADD3:%[0-9]+]]:_(p0) = G_PTR_ADD %InPtr, [[C6]](s20)
   ; CHECK-NEXT:   G_STORE [[C1]](s32), [[PTR_ADD3]](p0) :: (store (s32))
   ; CHECK-NEXT:   [[C7:%[0-9]+]]:_(s20) = G_CONSTANT i20 6
   ; CHECK-NEXT:   [[C8:%[0-9]+]]:_(s20) = G_CONSTANT i20 -13
   ; CHECK-NEXT:   %LoopPtrMod:_(p0) = G_PTR_ADD [[PTR_ADD3]], [[C8]](s20)
-  ; CHECK-NEXT:   [[C9:%[0-9]+]]:_(s20) = G_CONSTANT i20 -6
-  ; CHECK-NEXT:   [[PTR_ADD4:%[0-9]+]]:_(p0) = G_PTR_ADD %LoopPtrMod, [[C9]](s20)
   ; CHECK-NEXT:   G_STORE [[C1]](s32), %LoopPtrMod(p0) :: (store (s32))
   ; CHECK-NEXT:   %Inc:_(s32) = G_ADD %Idx, [[C]]
   ; CHECK-NEXT:   %BR_SEL:_(s1) = G_ICMP intpred(sle), %Idx(s32), %LoopBound
@@ -223,12 +221,12 @@ body:             |
   ; CHECK-NEXT:   G_BR %bb.2
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.2:
-  ; CHECK-NEXT:   [[PTR_ADD5:%[0-9]+]]:_(p0) = G_PTR_ADD %LoopPtrMod, [[C2]](s20)
+  ; CHECK-NEXT:   [[PTR_ADD4:%[0-9]+]]:_(p0) = G_PTR_ADD %LoopPtrMod, [[C2]](s20)
+  ; CHECK-NEXT:   G_STORE [[C1]](s32), [[PTR_ADD4]](p0) :: (store (s32))
+  ; CHECK-NEXT:   [[C9:%[0-9]+]]:_(s20) = G_CONSTANT i20 4
+  ; CHECK-NEXT:   [[C10:%[0-9]+]]:_(s20) = G_CONSTANT i20 -1
+  ; CHECK-NEXT:   [[PTR_ADD5:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD4]], [[C10]](s20)
   ; CHECK-NEXT:   G_STORE [[C1]](s32), [[PTR_ADD5]](p0) :: (store (s32))
-  ; CHECK-NEXT:   [[C10:%[0-9]+]]:_(s20) = G_CONSTANT i20 4
-  ; CHECK-NEXT:   [[C11:%[0-9]+]]:_(s20) = G_CONSTANT i20 -1
-  ; CHECK-NEXT:   [[PTR_ADD6:%[0-9]+]]:_(p0) = G_PTR_ADD [[PTR_ADD5]], [[C11]](s20)
-  ; CHECK-NEXT:   G_STORE [[C1]](s32), [[PTR_ADD6]](p0) :: (store (s32))
 
   bb.0.entry:
     successors: %bb.1
@@ -716,13 +714,11 @@ body:             |
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   %Idx:_(s32) = G_IMPLICIT_DEF
   ; CHECK-NEXT:   [[C6:%[0-9]+]]:_(s20) = G_CONSTANT i20 19
-  ; CHECK-NEXT:   [[PTR_ADD4:%[0-9]+]]:_(p0) = G_PTR_ADD %26, [[C6]](s20)
+  ; CHECK-NEXT:   [[PTR_ADD4:%[0-9]+]]:_(p0) = G_PTR_ADD %BasePTR, [[C6]](s20)
   ; CHECK-NEXT:   G_STORE [[LOAD1]](s32), [[PTR_ADD4]](p0) :: (store (s32))
   ; CHECK-NEXT:   [[C7:%[0-9]+]]:_(s20) = G_CONSTANT i20 6
   ; CHECK-NEXT:   [[C8:%[0-9]+]]:_(s20) = G_CONSTANT i20 -13
   ; CHECK-NEXT:   %LoopPtrMod:_(p0) = G_PTR_ADD [[PTR_ADD4]], [[C8]](s20)
-  ; CHECK-NEXT:   [[C9:%[0-9]+]]:_(s20) = G_CONSTANT i20 -6
-  ; CHECK-NEXT:   [[PTR_ADD5:%[0-9]+]]:_(p0) = G_PTR_ADD %LoopPtrMod, [[C9]](s20)
   ; CHECK-NEXT:   G_STORE [[LOAD1]](s32), %LoopPtrMod(p0) :: (store (s32))
   ; CHECK-NEXT:   %Inc:_(s32) = G_ADD %Idx, [[LOAD1]]
   ; CHECK-NEXT:   %BR_SEL:_(s1) = G_ICMP intpred(sle), %Idx(s32), [[LOAD2]]
@@ -730,7 +726,7 @@ body:             |
   ; CHECK-NEXT:   G_BR %bb.3
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.3:
-  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:_(p0) = G_PHI [[PTR_ADD2]](p0), %bb.0, [[PTR_ADD2]](p0), %bb.1, [[PTR_ADD5]](p0), %bb.2
+  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:_(p0) = G_PHI [[PTR_ADD2]](p0), %bb.0, [[PTR_ADD2]](p0), %bb.1, %BasePTR(p0), %bb.2
   ; CHECK-NEXT:   [[LOAD3:%[0-9]+]]:_(s32) = G_LOAD [[PHI]](p0) :: (dereferenceable load (s32))
   ; CHECK-NEXT:   PseudoRET implicit $lr, implicit [[LOAD]](s32), implicit [[LOAD1]](s32), implicit [[LOAD3]](s32)
   bb.0.entry:
@@ -774,7 +770,7 @@ body:             |
     PseudoRET implicit $lr, implicit %5, implicit %7, implicit %11
 ...
 
-# Only insert Phis in MBBs that are dominated by the definition MI and properly 
+# Only insert Phis in MBBs that are dominated by the definition MI and properly
 # update Outgoing Registers and the necessary phi nodes.
 # Example demonstrating that updatePhiRegMapping AND createPhisForRegMapping
 # should trigger a rerun of the while loop in replacePtrGlobally
