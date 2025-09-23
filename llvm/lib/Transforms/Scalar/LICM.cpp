@@ -4,6 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Modifications (c) Copyright 2025 Advanced Micro Devices, Inc. or its
+// affiliates
+//
 //===----------------------------------------------------------------------===//
 //
 // This pass performs loop invariant code motion, attempting to remove as much
@@ -573,6 +576,8 @@ bool llvm::sinkRegion(DomTreeNode *N, AAResults *AA, LoopInfo *LI,
   SmallVector<BasicBlock *, 16> Worklist =
       collectChildrenInLoop(DT, N, CurLoop);
 
+  SmallVector<std::pair<Instruction *, Instruction *>, 16> LoopInvariantStores;
+
   bool Changed = false;
   for (BasicBlock *BB : reverse(Worklist)) {
     // subloop (which would already have been processed).
@@ -601,6 +606,7 @@ bool llvm::sinkRegion(DomTreeNode *N, AAResults *AA, LoopInfo *LI,
       //
       bool FoldableInLoop = false;
       bool LoopNestMode = OutermostLoop != nullptr;
+
       if (!I.mayHaveSideEffects() &&
           isNotUsedOrFoldableInLoop(I, LoopNestMode ? OutermostLoop : CurLoop,
                                     SafetyInfo, TTI, FoldableInLoop,
@@ -613,10 +619,20 @@ bool llvm::sinkRegion(DomTreeNode *N, AAResults *AA, LoopInfo *LI,
             eraseInstruction(I, *SafetyInfo, MSSAU);
           }
           Changed = true;
+        } else {
+          // todo: manually remove store:
+          if (I.getOpcode() == Instruction::Store) {
+
+            SmallVector<BasicBlock *, 8> ExitBlocks;
+            CurLoop->getUniqueExitBlocks(ExitBlocks);
+            BasicBlock *BB = *ExitBlocks.begin();
+            LoopInvariantStores.push_back({&I, &*BB->getFirstNonPHIIt()});
+          }
         }
       }
     }
   }
+
   if (VerifyMemorySSA)
     MSSAU.getMemorySSA()->verifyMemorySSA();
   return Changed;

@@ -7999,6 +7999,16 @@ bool llvm::isGuaranteedToTransferExecutionToSuccessor(const Instruction *I) {
 
   // An instruction that returns without throwing must transfer control flow
   // to a successor.
+  dbgs() << "!MayThrow " << !I->mayThrow() << "\nWill Return "
+         << I->willReturn() << "\n";
+  dbgs() << I->getName() << "\n";
+  if (const auto CI = dyn_cast<CallInst>(I)) {
+    dbgs() << CI->getName();
+    if (Intrinsic::not_intrinsic != CI->getIntrinsicID())
+      return !I->mayThrow();
+    dbgs() << "IntrinsicID= " << CI->getIntrinsicID();
+  }
+  // const bool IsAIEIntrinsic = I->getName()
   return !I->mayThrow() && I->willReturn();
 }
 

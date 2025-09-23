@@ -4,6 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Modifications (c) Copyright 2025 Advanced Micro Devices, Inc. or its
+// affiliates
+//
 //===----------------------------------------------------------------------===//
 // Implements a class that is able to define some instructions as "special"
 // (e.g. as having implicit control flow, or writing memory, or having another
@@ -72,6 +75,7 @@ void InstructionPrecedenceTracking::fill(const BasicBlock *BB) {
     NumInstScanned++;
     if (isSpecialInstruction(&I)) {
       FirstSpecialInsts[BB] = &I;
+      LLVM_DEBUG(dbgs() << "Found Special Instr " << I << "\n");
       return;
     }
   }
