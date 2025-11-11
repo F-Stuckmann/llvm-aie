@@ -25,39 +25,31 @@ body:             |
   ; CHECK-NEXT:   renamable $dj0 = COPY $r2
   ; CHECK-NEXT:   renamable $dc0 = COPY $r3
   ; CHECK-NEXT:   $cml0, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   VST_CM_SPILL killed renamable $cml0, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
-  ; CHECK-NEXT:   $cml0, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   VST_CM_SPILL killed renamable $cml0, %stack.1, implicit $sp :: (store (s1024) into %stack.1, align 64)
-  ; CHECK-NEXT:   $cml0, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   VST_CM_SPILL killed renamable $cml0, %stack.2, implicit $sp :: (store (s1024) into %stack.2, align 64)
-  ; CHECK-NEXT:   $cml0, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   VST_CM_SPILL killed renamable $cml0, %stack.3, implicit $sp :: (store (s1024) into %stack.3, align 64)
+  ; CHECK-NEXT:   VST_DM_SPILL renamable $dm0, %stack.0, implicit $sp :: (store (s2048) into %stack.0, align 64)
+  ; CHECK-NEXT:   $cml1, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
+  ; CHECK-NEXT:   $cml2, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
+  ; CHECK-NEXT:   $cml3, $p2, $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, $m0, $dn0, $dj0, killed $dc0 :: (load (<32 x s16>))
   ; CHECK-NEXT:   renamable $x0 = IMPLICIT_DEF
   ; CHECK-NEXT:   renamable $x2 = IMPLICIT_DEF
   ; CHECK-NEXT:   renamable $r0 = IMPLICIT_DEF
-  ; CHECK-NEXT:   $cml0, dead $p2, dead $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, killed $m0, killed $dn0, killed $dj0, killed $dc0 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   VST_CM_SPILL killed renamable $cml0, %stack.4, implicit $sp :: (store (s1024) into %stack.4, align 64)
+  ; CHECK-NEXT:   $cml4, dead $p2, dead $dc0 = VLDA_2D_CONV_fp32_bf16_dmx_lda_ups_bf_split killed $p2, killed $m0, killed $dn0, killed $dj0, killed $dc0 :: (load (<32 x s16>))
   ; CHECK-NEXT:   renamable $p0 = IMPLICIT_DEF
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.1:
   ; CHECK-NEXT:   successors: %bb.1(0x80000000)
-  ; CHECK-NEXT:   liveins: $p0, $r0, $x0, $x2
+  ; CHECK-NEXT:   liveins: $dm1:0x000000000000000C, $dm2:0x000000000000000C, $dm3:0x000000000000000C, $dm4:0x000000000000000C, $p0, $r0, $x0, $x2
   ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   renamable $cml0 = VLDA_CM_SPILL %stack.0, implicit $sp :: (load (s1024) from %stack.0, align 64)
-  ; CHECK-NEXT:   renamable $dm0 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm0, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
-  ; CHECK-NEXT:   renamable $cml1 = VLDA_CM_SPILL %stack.1, implicit $sp :: (load (s1024) from %stack.1, align 64)
-  ; CHECK-NEXT:   renamable $dm1 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm1, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
-  ; CHECK-NEXT:   renamable $cml2 = VLDA_CM_SPILL %stack.2, implicit $sp :: (load (s1024) from %stack.2, align 64)
-  ; CHECK-NEXT:   renamable $dm2 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm2, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
-  ; CHECK-NEXT:   renamable $cml3 = VLDA_CM_SPILL %stack.3, implicit $sp :: (load (s1024) from %stack.3, align 64)
-  ; CHECK-NEXT:   renamable $dm3 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm3, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
-  ; CHECK-NEXT:   renamable $cml4 = VLDA_CM_SPILL %stack.4, implicit $sp :: (load (s1024) from %stack.4, align 64)
-  ; CHECK-NEXT:   renamable $dm4 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm4, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
+  ; CHECK-NEXT:   renamable $dm0 = VLDA_DM_SPILL %stack.0, implicit $sp :: (load (s2048) from %stack.0, align 64)
+  ; CHECK-NEXT:   renamable $dm0 = VMAC_f_vmac_bf_vmul_bf_core_X_X killed renamable $dm0, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
   ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml0, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
-  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml1, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
-  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml2, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
-  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml3, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
-  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml4, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
+  ; CHECK-NEXT:   renamable $dm0 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm1, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
+  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml0, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
+  ; CHECK-NEXT:   renamable $dm0 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm2, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
+  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml0, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
+  ; CHECK-NEXT:   renamable $dm0 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm3, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
+  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml0, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
+  ; CHECK-NEXT:   renamable $dm0 = VMAC_f_vmac_bf_vmul_bf_core_X_X renamable $dm4, renamable $x0, renamable $x2, renamable $r0, implicit-def dead $srfpflags, implicit $crfpmask
+  ; CHECK-NEXT:   renamable $p0 = VST_CONV_bf16_fp32_dmx_sts_srs_bf_pstm_nrm_imm killed renamable $cml0, killed renamable $p0, 64, implicit-def $srf2fflags, implicit $crf2fmask, implicit $crrnd :: (store (<32 x s16>))
   ; CHECK-NEXT:   PseudoJ_jump_imm %bb.1
   bb.0.entry:
     liveins: $r0, $r1, $r2, $r3, $p2
