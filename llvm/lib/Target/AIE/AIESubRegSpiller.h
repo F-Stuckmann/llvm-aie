@@ -18,9 +18,37 @@
 #include "llvm/CodeGen/InlineSpiller.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
-#include <memory>
 
 namespace llvm {
+
+/// This structure groups together all information needed to spill and reload
+/// a single subregister definition. Multiple SubRegSpillInfo entries may exist
+/// for the same virtual register if it has multiple distinct subregister
+/// writes.
+struct SubRegSpillInfo {
+  /// The defining operand being spilled.
+  /// Contains the register, subregister index, and other flags from the
+  /// original definition that needs to be spilled.
+  MachineOperand DefOp;
+
+  /// Stack slot allocated for this spill.
+  /// Created by VirtRegMap::createSpillSlot() based on the register class
+  /// of the defining operand.
+  unsigned StackSlot;
+
+  /// LiveInterval for the stack slot
+  LiveInterval *StackInt = nullptr;
+
+  /// Temporary virtual registers created during spilling.
+  /// These registers are used to transfer values between the original
+  /// register and the stack slot. They are assigned to StackSlot by
+  /// VirtRegMap and will be eliminated by the register allocator.
+  SmallVector<Register, 8> SpillVRegs;
+
+  /// Print debug information for this SubRegSpillInfo.
+  void dump(const MachineRegisterInfo *MRI,
+            const TargetRegisterInfo *TRI) const;
+};
 
 /// SpillInfo - Encapsulates all information needed to spill a single register.
 ///
@@ -37,26 +65,11 @@ namespace llvm {
 /// 4. Call insertSpills() and insertReloads() to insert the actual instructions
 class SpillInfo {
   /// Original register that is being spilled.
-  Register Reg;
+  Register OrigReg;
+
+  SmallVector<SubRegSpillInfo, 8> SubRegSpillInfos;
 
   SmallVector<std::pair<MachineInstr *, unsigned>, 8> Ops;
-
-  /// Defining operands of the original register.
-  /// Each defining operand may require a separate stack slot if it defines
-  /// a subregister or has different register class requirements.
-  SmallVector<MachineOperand, 8> DefOps;
-
-  /// Stack slots used to spill the original register.
-  /// One stack slot is allocated for each defining operand in DefOps.
-  SmallVector<unsigned, 8> StackSlots;
-
-  /// LiveInterval objects for the stack slots.
-  SmallVector<LiveInterval *, 8> StackInts;
-
-  /// New virtual registers created for spilling.
-  /// These temporary registers are used to transfer values between the
-  /// original register and the stack slots.
-  SmallVector<Register, 8> SpillVRegs;
 
   /// Instructions after which to insert spill stores.
   /// Spill stores are inserted immediately after the instruction that
@@ -110,7 +123,7 @@ public:
   /// Constructor - Initialize SpillInfo for the given register.
   ///
   /// \param Reg The original register to be spilled
-  SpillInfo(Register Reg) : Reg(Reg) {}
+  SpillInfo(Register Reg) : OrigReg(Reg) {}
 
   /// Collect spill and reload information for the given register.
   /// Analyzes all instructions using the register to identify write definitions
@@ -160,7 +173,7 @@ public:
   /// Get the original register being spilled.
   ///
   /// \return The original register
-  Register getReg() const { return Reg; }
+  Register getReg() const { return OrigReg; }
 
   /// Dump the SpillInfo for debugging purposes.
   /// Prints the register, defining operands, stack slots, spill virtual
