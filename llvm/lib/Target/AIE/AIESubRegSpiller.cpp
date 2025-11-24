@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AIESubRegSpiller.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -88,31 +89,26 @@ void SpillInfo::calcStack(MachineRegisterInfo &MRI,
 void SpillInfo::updateVRegOps(
     ArrayRef<std::pair<MachineInstr *, unsigned>> Ops) {
   // Save Operands of Register in this->Ops
-  this->Ops.clear();
   this->Ops.append(Ops.begin(), Ops.end());
 
   // Update SubRegSpillInfos with write definitions from the given operands.
   for (const auto &Op : Ops) {
     MachineOperand &MO = Op.first->getOperand(Op.second);
-    if (MO.isDef()) {
-      // Use isIdenticalTo for comparison instead of is_contained, since
-      // MachineOperand does not have operator== defined for direct container
-      // search.
-      bool Found = false;
-      for (const auto &Info : SubRegSpillInfos) {
-        if (Info.DefOp.isIdenticalTo(MO)) {
-          Found = true;
-          break;
-        }
-      }
-      if (!Found) {
-        LLVM_DEBUG(dbgs() << "Adding write def: " << MO << '\n');
-        SubRegSpillInfo Info{MO, 0, nullptr, {}};
-        SubRegSpillInfos.push_back(Info);
-      } else {
-        LLVM_DEBUG(dbgs() << "Write def already exists: " << MO << '\n');
-      }
+    if (!MO.isDef())
+      continue;
+
+    const bool FoundDefMO =
+        llvm::any_of(SubRegSpillInfos, [&](const auto &Info) {
+          return Info.DefOp.isIdenticalTo(MO);
+        });
+    if (FoundDefMO) {
+      LLVM_DEBUG(dbgs() << "Write def already exists: " << MO << '\n');
+      continue;
     }
+
+    LLVM_DEBUG(dbgs() << "Adding write def: " << MO << '\n');
+    SubRegSpillInfo Info{MO, 0, nullptr, {}};
+    SubRegSpillInfos.push_back(Info);
   }
 }
 
