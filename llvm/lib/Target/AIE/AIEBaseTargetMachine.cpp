@@ -17,9 +17,9 @@
 #include "AIE.h"
 #include "AIE2TargetMachine.h"
 #include "AIEBaseAliasAnalysis.h"
-#include "AIEInlineSpiller.h"
 #include "AIEMachineFunctionInfo.h"
 #include "AIEMachineScheduler.h"
+#include "AIESubRegSpiller.h"
 #include "AIETargetObjectFile.h"
 #include "TargetInfo/AIETargetInfo.h"
 #include "aie1/AIE1TargetMachine.h"
@@ -401,7 +401,7 @@ Spiller *
 AIEBasePassConfig::createSpiller(const Spiller::RequiredAnalyses &Analyses,
                                  MachineFunction &MF, VirtRegMap &VRM,
                                  VirtRegAuxInfo &VRAI) const {
-  return new AIEInlineSpiller(Analyses, MF, VRM, VRAI);
+  return new AIESubRegSpiller(Analyses, MF, VRM, VRAI);
 }
 
 std::unique_ptr<CSEConfigBase> AIEBasePassConfig::getCSEConfig() const {

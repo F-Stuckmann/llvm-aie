@@ -99,7 +99,7 @@ add_llvm_target(AIECodeGen
    AIEGlobalCombiner.cpp
    AIEGlobalCombinerPtrMods.cpp
    AIEHazardRecognizer.cpp
-   AIEInlineSpiller.cpp
+   AIESubRegSpiller.cpp
    AIEInterBlockScheduling.cpp
    AIEISelDAGToDAG.cpp
    AIELegalizerHelper.cpp

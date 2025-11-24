@@ -1,4 +1,4 @@
-//===- AIEInlineSpiller.cpp - Custom AIE Inline Spiller -------------------===//
+//===- AIESubRegSpiller.cpp - Custom AIE SubReg Spiller -------------------===//
 //
 // This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,12 +8,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements the AIEInlineSpiller class, which provides AIE-specific
+// This file implements the AIESubRegSpiller class, which provides AIE-specific
 // spilling strategies by wrapping the standard InlineSpiller.
 //
 //===----------------------------------------------------------------------===//
 
-#include "AIEInlineSpiller.h"
+#include "AIESubRegSpiller.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -36,7 +36,7 @@ using namespace llvm;
 STATISTIC(NumSubRegSpills, "Number of subregister spills inserted");
 STATISTIC(NumSubRegReloads, "Number of subregister reloads inserted");
 
-AIEInlineSpiller::AIEInlineSpiller(const Spiller::RequiredAnalyses &Analyses,
+AIESubRegSpiller::AIESubRegSpiller(const Spiller::RequiredAnalyses &Analyses,
                                    MachineFunction &MF, VirtRegMap &VRM,
                                    VirtRegAuxInfo &VRAI)
     : InlineSpiller(Analyses, MF, VRM, VRAI) {
@@ -45,7 +45,7 @@ AIEInlineSpiller::AIEInlineSpiller(const Spiller::RequiredAnalyses &Analyses,
   // Add AIE-specific initialization here if needed
 }
 
-void AIEInlineSpiller::spillAll() {
+void AIESubRegSpiller::spillAll() {
   SpillInfo SI = collectSpillInfo();
 
   SI.calcStack(MRI, TRI, VRM, LSS);
@@ -62,7 +62,7 @@ void AIEInlineSpiller::spillAll() {
   LLVM_DEBUG(MF.dump());
 }
 
-SpillInfo AIEInlineSpiller::collectSpillInfo() const {
+SpillInfo AIESubRegSpiller::collectSpillInfo() const {
   SpillInfo SI(Original);
   for (Register Reg : RegsToSpill) {
     SI.update(Reg, MRI);
@@ -183,6 +183,8 @@ void SpillInfo::insertSpill(MachineInstr *MI, bool IsKill,
 
   MachineBasicBlock::iterator Spill = std::next(MI->getIterator());
   LIS.InsertMachineInstrRangeInMaps(Spill, MIS.end());
+
+  LLVM_DEBUG(MBB.dump());
 }
 
 Register SpillInfo::insertReload(MachineInstr *MI, MachineRegisterInfo &MRI,
@@ -224,6 +226,8 @@ Register SpillInfo::insertReload(MachineInstr *MI, MachineRegisterInfo &MRI,
   }
 
   LIS.InsertMachineInstrRangeInMaps(MIS.begin(), MI);
+
+  LLVM_DEBUG(MBB.dump());
   return NewVReg;
 }
 
@@ -286,7 +290,6 @@ void SpillInfo::dump() const {
     const TargetRegisterClass *RC = MRI->getRegClass(Reg);
     dbgs() << ", RC: " << TRI->getRegClassName(RC);
   }
-  dbgs() << "\n";
 
   dbgs() << "  Ops (" << Ops.size() << "):\n";
   for (const auto &Op : Ops) {
@@ -327,4 +330,23 @@ void SpillInfo::dump() const {
   for (const auto *MI : ReloadLocations) {
     dbgs() << "    " << *MI;
   }
+
+  // Dump the MachineBasicBlock of SpillLocations and ReloadLocations. Only dump
+  // one if they are the same MBB.
+  const MachineBasicBlock *SpillMBB = nullptr;
+  const MachineBasicBlock *ReloadMBB = nullptr;
+  if (!SpillLocations.empty())
+    SpillMBB = SpillLocations.front()->getParent();
+  if (!ReloadLocations.empty())
+    ReloadMBB = ReloadLocations.front()->getParent();
+
+  if (SpillMBB && SpillMBB == ReloadMBB) {
+    dbgs() << "  MBB (Spill/Reload): " << *SpillMBB << "\n";
+  } else {
+    if (SpillMBB)
+      dbgs() << "  Spill MBB: " << *SpillMBB << "\n";
+    if (ReloadMBB)
+      dbgs() << "  Reload MBB: " << *ReloadMBB << "\n";
+  }
+  dbgs() << "\n";
 }

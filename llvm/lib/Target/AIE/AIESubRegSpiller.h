@@ -1,4 +1,4 @@
-//===- AIEInlineSpiller.h - Custom AIE Inline Spiller -----------*- C++ -*-===//
+//===- AIESubRegSpiller.h - Custom AIE SubReg Spiller -----------*- C++ -*-===//
 //
 // This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,12 +8,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Custom AIE inline spiller.
+// Custom AIE subreg spiller.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TARGET_AIE_AIEINLINESPILLER_H
-#define LLVM_LIB_TARGET_AIE_AIEINLINESPILLER_H
+#ifndef LLVM_LIB_TARGET_AIE_AIESUBREGSPILLER_H
+#define LLVM_LIB_TARGET_AIE_AIESUBREGSPILLER_H
 
 #include "llvm/CodeGen/InlineSpiller.h"
 #include "llvm/CodeGen/MachineOperand.h"
@@ -168,7 +168,7 @@ public:
   void dump() const;
 };
 
-/// AIEInlineSpiller - AIE-specific register spiller.
+/// AIESubRegSpiller - AIE-specific register spiller.
 ///
 /// This class extends the base Spiller functionality to provide AIE-specific
 /// spilling strategies. It handles the spilling of virtual registers to stack
@@ -187,19 +187,19 @@ public:
 /// spill
 /// 2. collectSpillInfo() - Gather information about spill/reload locations
 /// 3. spillAll() - Allocate stack slots and insert spill/reload instructions
-class AIEInlineSpiller : public InlineSpiller {
+class AIESubRegSpiller : public InlineSpiller {
   /// Collection of SpillInfo objects created during spilling.
   /// Each SpillInfo tracks the spill/reload operations for one register.
   SmallVector<SpillInfo, 8> SpillInfos;
 
 public:
-  /// Constructor - Initialize the AIE inline spiller.
+  /// Constructor - Initialize the AIE subreg spiller.
   ///
   /// \param Analyses Required analyses including LiveIntervals and LiveStacks
   /// \param MF Machine function being processed
   /// \param VRM Virtual register map
   /// \param VRAI Virtual register auxiliary info for weight calculation
-  AIEInlineSpiller(const Spiller::RequiredAnalyses &Analyses,
+  AIESubRegSpiller(const Spiller::RequiredAnalyses &Analyses,
                    MachineFunction &MF, VirtRegMap &VRM, VirtRegAuxInfo &VRAI);
 
 protected:
@@ -230,4 +230,4 @@ protected:
 
 } // namespace llvm
 
-#endif // LLVM_LIB_TARGET_AIE_AIEINLINESPILLER_H
+#endif // LLVM_LIB_TARGET_AIE_AIESUBREGSPILLER_H
