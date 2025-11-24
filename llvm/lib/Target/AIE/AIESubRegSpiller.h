@@ -21,6 +21,16 @@
 
 namespace llvm {
 
+namespace SubregSpiller {
+struct VirtRegInfoAndOps {
+  VirtRegInfo RI;
+  SmallVector<std::pair<MachineInstr *, unsigned>, 8> Ops;
+
+  void dump(const MachineRegisterInfo *MRI,
+            const TargetRegisterInfo *TRI) const;
+};
+} // namespace SubregSpiller
+
 /// This structure groups together all information needed to spill and reload
 /// a single subregister definition. Multiple SubRegSpillInfo entries may exist
 /// for the same virtual register if it has multiple distinct subregister
@@ -117,7 +127,8 @@ class SpillInfo {
   /// register.
   ///
   /// \param NewVReg The new virtual register to replace the old one
-  void replaceVReg(Register NewVReg);
+  void replaceVReg(SubregSpiller::VirtRegInfoAndOps &VirtRegInfoAndOps,
+                   Register NewVReg);
 
 public:
   /// Constructor - Initialize SpillInfo for the given register.

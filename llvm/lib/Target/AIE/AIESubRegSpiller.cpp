@@ -46,6 +46,42 @@ AIESubRegSpiller::AIESubRegSpiller(const Spiller::RequiredAnalyses &Analyses,
   // Add AIE-specific initialization here if needed
 }
 
+namespace {
+
+SubregSpiller::VirtRegInfoAndOps getVirtRegInfoAndOps(MachineInstr &MI,
+                                                      const Register Reg) {
+  SmallVector<std::pair<MachineInstr *, unsigned>, 8> Ops;
+  VirtRegInfo RI = AnalyzeVirtRegInBundle(MI, Reg, &Ops);
+  return SubregSpiller::VirtRegInfoAndOps{RI, Ops};
+}
+
+} // namespace
+
+void SubregSpiller::VirtRegInfoAndOps::dump(
+    const MachineRegisterInfo *MRI, const TargetRegisterInfo *TRI) const {
+  dbgs() << "VirtRegInfoAndOps:\n";
+  dbgs() << "  Reads: " << (RI.Reads ? "true" : "false") << "\n";
+  dbgs() << "  Writes: " << (RI.Writes ? "true" : "false") << "\n";
+  dbgs() << "  Tied: " << (RI.Tied ? "true" : "false") << "\n";
+  dbgs() << "  Ops (" << Ops.size() << "):\n";
+  for (const auto &Op : Ops) {
+    MachineOperand &MO = Op.first->getOperand(Op.second);
+    dbgs() << "    OpIdx: " << Op.second;
+    if (MO.isReg()) {
+      Register Reg = MO.getReg();
+      dbgs() << ", Reg: " << printReg(Reg, TRI);
+      if (MRI && Reg.isVirtual()) {
+        const TargetRegisterClass *RC = MRI->getRegClass(Reg);
+        dbgs() << ", RC: " << TRI->getRegClassName(RC);
+      }
+      if (MO.getSubReg())
+        dbgs() << ", SubReg: " << MO.getSubReg();
+    }
+    dbgs() << "\n";
+    dbgs() << "      " << *Op.first;
+  }
+}
+
 void AIESubRegSpiller::spillAll() {
   SpillInfo SI = collectSpillInfo();
 
@@ -121,17 +157,16 @@ void SpillInfo::update(Register Reg, MachineRegisterInfo &MRI) {
     }
 
     // Analyze instruction.
-    SmallVector<std::pair<MachineInstr *, unsigned>, 8> Ops;
-    VirtRegInfo RI = AnalyzeVirtRegInBundle(MI, Reg, &Ops);
-
-    if (RI.Writes) {
-      // Save the defining operands of the write.
+    const auto [RegInfo, Ops] = getVirtRegInfoAndOps(MI, Reg);
+    if (RegInfo.Writes) {
+      // Save the defining operands to determine which subregs really need to be
+      // spilled.
       updateVRegOps(Ops);
       LLVM_DEBUG(dbgs() << "Adding spill location: " << MI);
       SpillLocations.push_back(&MI);
     }
 
-    if (RI.Reads) {
+    if (RegInfo.Reads) {
       LLVM_DEBUG(dbgs() << "Adding reload location: " << MI);
       ReloadLocations.push_back(&MI);
     }
@@ -233,11 +268,12 @@ Register SpillInfo::insertReload(MachineInstr *MI, MachineRegisterInfo &MRI,
   return NewVReg;
 }
 
-void SpillInfo::replaceVReg(Register NewVReg) {
-  // Todo: will i not replace Uses before spilling?
-  for (const auto &OpPair : Ops) {
+void SpillInfo::replaceVReg(SubregSpiller::VirtRegInfoAndOps &VRIAndOps,
+                            const Register NewVReg) {
+
+  for (const auto &OpPair : VRIAndOps.Ops) {
     MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
-    LLVM_DEBUG(dbgs() << "Replacing virtual register: " << printReg(MO.getReg())
+    LLVM_DEBUG(dbgs() << "Replacing virtual register: " << printReg(OrigReg)
                       << " in " << *OpPair.first << " with "
                       << printReg(NewVReg) << "\n";);
     MO.setReg(NewVReg);
@@ -265,8 +301,15 @@ void SpillInfo::insertReloads(MachineRegisterInfo &MRI,
                               const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                               LiveIntervals &LIS) {
   for (MachineInstr *MI : ReloadLocations) {
+    // Collect MOs of the original register.
+    auto VRIAndOps = getVirtRegInfoAndOps(*MI, getReg());
+    LLVM_DEBUG(VRIAndOps.dump(&MRI, &TRI));
+
+    // Reload the register.
     Register NewVReg = insertReload(MI, MRI, TII, TRI, VRM, LIS);
-    replaceVReg(NewVReg);
+    // Replace the virtual register in the operands with the new virtual
+    // register.
+    replaceVReg(VRIAndOps, NewVReg);
   }
 }
 
