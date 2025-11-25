@@ -14,7 +14,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "AIESubRegSpiller.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -24,6 +26,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/Spiller.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
@@ -95,16 +98,72 @@ void AIESubRegSpiller::spillAll() {
   SI.insertReloads(MRI, TII, TRI, VRM, LIS);
   SI.insertSpills(MRI, TII, TRI, VRM, LIS);
   SpillInfos.push_back(SI);
+
+  // Update LiveIntervals for the original register and the edited register.
+  SmallVector<Register, 2> EditRegs = {SI.getReg()};
+  if (Edit->getReg() != SI.getReg())
+    EditRegs.push_back(Edit->getReg());
+  SI.updateLIS(EditRegs, LIS, true);
+
+  // todo: why not include Edit->getReg() in RegsToSpill?
   RegsToSpill.emplace_back(SI.getReg());
-  LLVM_DEBUG(MF.dump());
+
+  deleteSpilledVirtualRegs();
+  LLVM_DEBUG(dbgs() << "[SubRegSpiller] After deleteSpilledVirtualRegs:\n";
+             LIS.dump());
 }
 
 SpillInfo AIESubRegSpiller::collectSpillInfo() const {
+  LLVM_DEBUG(dbgs() << "Collecting Spill info for " << RegsToSpill.size()
+                    << " regs\n");
+
+  // todo: is Edit->getReg() the same as the first RegsToSpill?
   SpillInfo SI(Original);
+  SI.updateDefSubRegs(RegsToSpill, MRI);
+
   for (Register Reg : RegsToSpill) {
+    LLVM_DEBUG(dbgs() << "updating Reg " << printReg(Reg) << "\n");
     SI.update(Reg, MRI);
   }
   return SI;
+}
+
+void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
+                                 const MachineRegisterInfo &MRI) {
+  // Track which subreg indices we've already created entries for
+  SmallSet<unsigned, 8> SeenSubRegIndices;
+
+  for (const Register Reg : RegsToSpill) {
+    for (MachineInstr &MI : llvm::make_early_inc_range(MRI.reg_bundles(Reg))) {
+      if (MI.isDebugValue()) {
+        LLVM_DEBUG(dbgs() << "Skipping debug value: " << MI);
+        continue;
+      }
+
+      const auto [RegInfo, Ops] = getVirtRegInfoAndOps(MI, Reg);
+
+      // Process each def operand to collect subreg indices
+      for (const auto &Op : Ops) {
+        MachineOperand &MO = Op.first->getOperand(Op.second);
+        if (!MO.isDef())
+          continue;
+
+        unsigned SubRegIdx = MO.getSubReg();
+
+        // Check if we've already created a SubRegSpillInfo for this subreg
+        // index
+        if (SeenSubRegIndices.count(SubRegIdx))
+          continue;
+
+        // Create a new SubRegSpillInfo for this unique subreg index
+        LLVM_DEBUG(dbgs() << "Adding SubRegSpillInfo for subreg index: "
+                          << SubRegIdx << '\n');
+        SubRegSpillInfo Info{SubRegIdx, 0, nullptr, {}};
+        SubRegSpillInfos.push_back(Info);
+        SeenSubRegIndices.insert(SubRegIdx);
+      }
+    }
+  }
 }
 
 void SpillInfo::calcStack(MachineRegisterInfo &MRI,
@@ -112,45 +171,20 @@ void SpillInfo::calcStack(MachineRegisterInfo &MRI,
                           LiveStacks &LSS) {
 
   for (auto &Info : SubRegSpillInfos) {
-    // get Original register from the defining operand
-    const TargetRegisterClass *RC = MRI.getRegClass(Info.DefOp.getReg());
-    if (Info.DefOp.getSubReg()) {
-      RC = TRI.getSubClassWithSubReg(RC, Info.DefOp.getSubReg());
+    // Get register class from the original register being spilled
+    const TargetRegisterClass *RC = MRI.getRegClass(OrigReg);
+    if (Info.SubRegIdx) {
+      RC = TRI.getSubRegisterClass(RC, Info.SubRegIdx);
     }
 
     Info.StackSlot = VRM.createSpillSlot(RC);
   }
 }
 
-void SpillInfo::updateVRegOps(
-    ArrayRef<std::pair<MachineInstr *, unsigned>> Ops) {
-  // Save Operands of Register in this->Ops
-  this->Ops.append(Ops.begin(), Ops.end());
-
-  // Update SubRegSpillInfos with write definitions from the given operands.
-  for (const auto &Op : Ops) {
-    MachineOperand &MO = Op.first->getOperand(Op.second);
-    if (!MO.isDef())
-      continue;
-
-    const bool FoundDefMO =
-        llvm::any_of(SubRegSpillInfos, [&](const auto &Info) {
-          return Info.DefOp.isIdenticalTo(MO);
-        });
-    if (FoundDefMO) {
-      LLVM_DEBUG(dbgs() << "Write def already exists: " << MO << '\n');
-      continue;
-    }
-
-    LLVM_DEBUG(dbgs() << "Adding write def: " << MO << '\n');
-    SubRegSpillInfo Info{MO, 0, nullptr, {}};
-    SubRegSpillInfos.push_back(Info);
-  }
-}
-
-void SpillInfo::update(Register Reg, MachineRegisterInfo &MRI) {
+void SpillInfo::update(const Register Reg, MachineRegisterInfo &MRI) {
   // Iterate over instructions using Reg.
-  for (MachineInstr &MI : llvm::make_early_inc_range(MRI.reg_bundles(Reg))) {
+  // Note: No changes are made to registers just yet
+  for (MachineInstr &MI : MRI.reg_bundles(Reg)) {
     if (MI.isDebugValue()) {
       LLVM_DEBUG(dbgs() << "Skipping debug value: " << MI);
       continue;
@@ -159,22 +193,50 @@ void SpillInfo::update(Register Reg, MachineRegisterInfo &MRI) {
     // Analyze instruction.
     const auto [RegInfo, Ops] = getVirtRegInfoAndOps(MI, Reg);
     if (RegInfo.Writes) {
-      // Save the defining operands to determine which subregs really need to be
-      // spilled.
-      updateVRegOps(Ops);
       LLVM_DEBUG(dbgs() << "Adding spill location: " << MI);
-      SpillLocations.push_back(&MI);
+      SpillLocations.push_back({&MI, Reg});
     }
 
     if (RegInfo.Reads) {
       LLVM_DEBUG(dbgs() << "Adding reload location: " << MI);
-      ReloadLocations.push_back(&MI);
+      ReloadLocations.push_back({&MI, Reg});
     }
   }
 }
 
-void SpillInfo::insertSpill(MachineInstr *MI, bool IsKill,
-                            MachineRegisterInfo &MRI,
+void SpillInfo::updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
+                          const bool SkipNoInterval) {
+  for (auto Reg : Regs) {
+
+    if (SkipNoInterval && !LIS.hasInterval(Reg))
+      continue;
+
+    if (LIS.hasInterval(Reg)) {
+      LIS.removeInterval(Reg);
+    }
+
+    LIS.createAndComputeVirtRegInterval(Reg);
+    LIS.shrinkToUses(&LIS.getInterval(Reg));
+  }
+}
+
+void SpillInfo::updateLIS(MachineBasicBlock::iterator Begin,
+                          MachineBasicBlock::iterator End, LiveIntervals &LIS) {
+  LIS.InsertMachineInstrRangeInMaps(Begin, End);
+
+  // Collect Defs
+  SmallVector<Register, 8> Defs;
+  for (const MachineInstr &MI : make_range(Begin, End)) {
+    for (const MachineOperand &MO : MI.all_defs()) {
+      const Register Reg = MO.getReg();
+      Defs.push_back(Reg);
+    }
+  }
+  updateLIS(Defs, LIS);
+}
+
+void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
+                            bool IsKill, MachineRegisterInfo &MRI,
                             const TargetInstrInfo &TII,
                             const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                             LiveIntervals &LIS) {
@@ -182,28 +244,32 @@ void SpillInfo::insertSpill(MachineInstr *MI, bool IsKill,
   MachineInstrSpan MIS(MI, &MBB);
   MachineBasicBlock::iterator SpillBefore = std::next(MI->getIterator());
 
-  for (auto &Info : SubRegSpillInfos) {
-    Register OrigReg = Info.DefOp.getReg();
-    int StackSlot = Info.StackSlot;
-    const TargetRegisterClass *RC = MRI.getRegClass(OrigReg);
+  const TargetRegisterClass *OrigRC = MRI.getRegClass(ToSpill);
 
-    const bool IsSubReg = Info.DefOp.getSubReg() != 0;
+  for (auto &Info : SubRegSpillInfos) {
+    int StackSlot = Info.StackSlot;
+    const bool IsSubReg = Info.SubRegIdx != 0;
+
+    // Find the operand that matches this SubRegIdx
+    const TargetRegisterClass *RC =
+        !Info.SubRegIdx ? OrigRC
+                        : TRI.getSubRegisterClass(OrigRC, Info.SubRegIdx);
+    assert(!IsSubReg || IsSubReg && OrigRC != RC &&
+                            "Subreg RC should be different from OrigRC");
 
     // Create a new virtual register
     Register NewVReg = MRI.createVirtualRegister(RC);
     Info.SpillVRegs.push_back(NewVReg);
 
-    // Create COPY: NewVReg = COPY OrigReg
-    BuildMI(MBB, SpillBefore, MI->getDebugLoc(), TII.get(TargetOpcode::COPY),
-            NewVReg)
-        .addReg(OrigReg, getKillRegState(IsKill));
+    // Create COPY: NewVReg = COPY OrigReg:subreg
+    auto CopyBuilder = BuildMI(MBB, SpillBefore, MI->getDebugLoc(),
+                               TII.get(TargetOpcode::COPY), NewVReg);
+    CopyBuilder.addReg(ToSpill, getKillRegState(IsKill), Info.SubRegIdx);
 
-    // Assign the new virtual register to the stack
-    // slot
+    // Assign the new virtual register to the stack slot
     VRM.assignVirt2StackSlot(NewVReg, StackSlot);
 
-    // Store the new virtual register to the stack
-    // slot
+    // Store the new virtual register to the stack slot
     TII.storeRegToStackSlot(MBB, SpillBefore, NewVReg, true, StackSlot, RC,
                             &TRI, Register());
 
@@ -213,39 +279,47 @@ void SpillInfo::insertSpill(MachineInstr *MI, bool IsKill,
       NumSpills++;
   }
 
-  MachineBasicBlock::iterator Spill = std::next(MI->getIterator());
-  LIS.InsertMachineInstrRangeInMaps(Spill, MIS.end());
+  updateLIS(std::next(MI->getIterator()), MIS.end(), LIS);
 
   LLVM_DEBUG(MBB.dump());
 }
 
-Register SpillInfo::insertReload(MachineInstr *MI, MachineRegisterInfo &MRI,
-                                 const TargetInstrInfo &TII,
-                                 const TargetRegisterInfo &TRI, VirtRegMap &VRM,
-                                 LiveIntervals &LIS) {
+void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
+                             MachineRegisterInfo &MRI,
+                             const TargetInstrInfo &TII,
+                             const TargetRegisterInfo &TRI, VirtRegMap &VRM,
+                             LiveIntervals &LIS) {
+  // Collect MOs of the original register.
+  SubregSpiller::VirtRegInfoAndOps VRIAndOps =
+      getVirtRegInfoAndOps(*MI, ToBeReplacedReg);
+
   MachineBasicBlock &MBB = *MI->getParent();
   MachineInstrSpan MIS(MI, &MBB);
 
-  // Create a new virtual register
-  const TargetRegisterClass *RC = MRI.getRegClass(OrigReg);
-  Register NewVReg = MRI.createVirtualRegister(RC);
+  // Create a new virtual register for the parent register
+  const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
+  Register NewVReg = MRI.createVirtualRegister(OrigRC);
 
   for (unsigned I = 0; I < SubRegSpillInfos.size(); I++) {
     auto &Info = SubRegSpillInfos[I];
-    Register OrigReg = Info.DefOp.getReg();
-    unsigned SubRegIdx = Info.DefOp.getSubReg();
+    unsigned SubRegIdx = Info.SubRegIdx;
     int StackSlot = Info.StackSlot;
 
-    const bool IsSubReg = Info.DefOp.getSubReg() != 0;
+    const bool IsSubReg = Info.SubRegIdx != 0;
     unsigned AdditionalFlag = IsSubReg && I == 0 ? getUndefRegState(true) : 0;
 
-    // Assign the new virtual register to the stack slot
-    const TargetRegisterClass *SubRC = MRI.getRegClass(OrigReg);
-    Register TempReg = MRI.createVirtualRegister(SubRC);
+    // Determine register class for the subreg
+    const TargetRegisterClass *RC =
+        !SubRegIdx ? OrigRC : TRI.getSubRegisterClass(OrigRC, SubRegIdx);
+    assert(!SubRegIdx || SubRegIdx && OrigRC != RC &&
+                             "Subreg RC should be different from OrigRC");
+
+    // Create temp register and assign to stack slot
+    Register TempReg = MRI.createVirtualRegister(RC);
     VRM.assignVirt2StackSlot(TempReg, StackSlot);
 
-    TII.loadRegFromStackSlot(MBB, MI, TempReg, StackSlot, SubRC, &TRI,
-                             Register());
+    // Load from stack slot
+    TII.loadRegFromStackSlot(MBB, MI, TempReg, StackSlot, RC, &TRI, Register());
 
     // Copy from the temporary to the parent register's subregister
     auto CopyMIBuilder =
@@ -254,36 +328,16 @@ Register SpillInfo::insertReload(MachineInstr *MI, MachineRegisterInfo &MRI,
             .addReg(TempReg, RegState::Kill);
     LLVM_DEBUG(dbgs() << "Inserted: " << *CopyMIBuilder.getInstr());
 
-    // Ops.push_back(std::make_pair(CopyMIBuilder.getInstr(), 0));
-
     if (IsSubReg)
       NumSubRegReloads++;
     else
       NumReloads++;
   }
+  // Replace Old Register with reloaded Copy Register (NewVReg)
+  SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
 
-  LIS.InsertMachineInstrRangeInMaps(MIS.begin(), MI);
-
-  LLVM_DEBUG(MBB.dump());
-  return NewVReg;
-}
-
-void SpillInfo::replaceVReg(SubregSpiller::VirtRegInfoAndOps &VRIAndOps,
-                            const Register NewVReg) {
-
-  for (const auto &OpPair : VRIAndOps.Ops) {
-    MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
-    LLVM_DEBUG(dbgs() << "Replacing virtual register: " << printReg(OrigReg)
-                      << " in " << *OpPair.first << " with "
-                      << printReg(NewVReg) << "\n";);
-    MO.setReg(NewVReg);
-    if (!MO.isUse())
-      continue;
-
-    if (!OpPair.first->isRegTiedToDefOperand(OpPair.second))
-      MO.setIsKill();
-  }
-  return;
+  // Update LIS, now that all newly inserted Copy Regs have been attached.
+  updateLIS(MIS.begin(), MI, LIS);
 }
 
 void SpillInfo::insertSpills(MachineRegisterInfo &MRI,
@@ -291,8 +345,10 @@ void SpillInfo::insertSpills(MachineRegisterInfo &MRI,
                              const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                              LiveIntervals &LIS) {
   const bool IsKill = true;
-  for (MachineInstr *MI : SpillLocations) {
-    insertSpill(MI, IsKill, MRI, TII, TRI, VRM, LIS);
+  for (auto [MI, Reg] : SpillLocations) {
+    LLVM_DEBUG(dbgs() << "Inserting Spill for " << printReg(Reg) << " : " << *MI
+                      << "\n";);
+    insertSpill(MI, Reg, IsKill, MRI, TII, TRI, VRM, LIS);
   }
 }
 
@@ -300,27 +356,16 @@ void SpillInfo::insertReloads(MachineRegisterInfo &MRI,
                               const TargetInstrInfo &TII,
                               const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                               LiveIntervals &LIS) {
-  for (MachineInstr *MI : ReloadLocations) {
-    // Collect MOs of the original register.
-    auto VRIAndOps = getVirtRegInfoAndOps(*MI, getReg());
-    LLVM_DEBUG(VRIAndOps.dump(&MRI, &TRI));
-
-    // Reload the register.
-    Register NewVReg = insertReload(MI, MRI, TII, TRI, VRM, LIS);
-    // Replace the virtual register in the operands with the new virtual
-    // register.
-    replaceVReg(VRIAndOps, NewVReg);
+  for (auto [MI, Reg] : ReloadLocations) {
+    LLVM_DEBUG(dbgs() << "Inserting Reload for " << printReg(Reg) << " : "
+                      << *MI << "\n");
+    insertReload(MI, Reg, MRI, TII, TRI, VRM, LIS);
   }
 }
 
 void SubRegSpillInfo::dump(const MachineRegisterInfo *MRI,
                            const TargetRegisterInfo *TRI) const {
-  dbgs() << "    DefOp Reg: " << printReg(DefOp.getReg());
-  if (MRI && DefOp.getReg().isVirtual()) {
-    const TargetRegisterClass *RC = MRI->getRegClass(DefOp.getReg());
-    dbgs() << ", RC: " << TRI->getRegClassName(RC);
-  }
-  dbgs() << ", SubReg: " << DefOp.getSubReg();
+  dbgs() << "    SubRegIdx: " << SubRegIdx;
   dbgs() << ", StackSlot: " << StackSlot;
   dbgs() << ", StackInt: " << StackInt;
   dbgs() << ", SpillVRegs: [";
@@ -341,9 +386,9 @@ void SpillInfo::dump() const {
   auto GetMRI = [this]() -> const MachineRegisterInfo * {
     const MachineInstr *MI = nullptr;
     if (!SpillLocations.empty())
-      MI = SpillLocations[0];
+      MI = SpillLocations[0].first;
     else if (!ReloadLocations.empty())
-      MI = ReloadLocations[0];
+      MI = ReloadLocations[0].first;
 
     if (MI)
       if (const MachineFunction *MF = MI->getMF())
@@ -360,34 +405,29 @@ void SpillInfo::dump() const {
     dbgs() << ", RC: " << TRI->getRegClassName(RC);
   }
 
-  dbgs() << "  Ops (" << Ops.size() << "):\n";
-  for (const auto &Op : Ops) {
-    dbgs() << "    " << printReg(Op.second) << " " << *Op.first;
-  }
-
   dbgs() << "  SubRegSpillInfos (" << SubRegSpillInfos.size() << "):\n";
   for (const auto &Info : SubRegSpillInfos) {
     Info.dump(MRI, TRI);
   }
 
   dbgs() << "  SpillLocations (" << SpillLocations.size() << "):\n";
-  for (const auto *MI : SpillLocations) {
+  for (const auto &[MI, Reg] : SpillLocations) {
     dbgs() << "    " << *MI;
   }
 
   dbgs() << "  ReloadLocations (" << ReloadLocations.size() << "):\n";
-  for (const auto *MI : ReloadLocations) {
+  for (const auto &[MI, _] : ReloadLocations) {
     dbgs() << "    " << *MI;
   }
 
-  // Dump the MachineBasicBlock of SpillLocations and ReloadLocations. Only dump
-  // one if they are the same MBB.
+  // Dump the MachineBasicBlock of SpillLocations and ReloadLocations. Only
+  // dump one if they are the same MBB.
   const MachineBasicBlock *SpillMBB = nullptr;
   const MachineBasicBlock *ReloadMBB = nullptr;
   if (!SpillLocations.empty())
-    SpillMBB = SpillLocations.front()->getParent();
+    SpillMBB = SpillLocations.front().first->getParent();
   if (!ReloadLocations.empty())
-    ReloadMBB = ReloadLocations.front()->getParent();
+    ReloadMBB = ReloadLocations.front().first->getParent();
 
   if (SpillMBB && SpillMBB == ReloadMBB) {
     dbgs() << "  MBB (Spill/Reload): " << *SpillMBB << "\n";

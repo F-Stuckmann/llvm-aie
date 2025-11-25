@@ -36,10 +36,10 @@ struct VirtRegInfoAndOps {
 /// for the same virtual register if it has multiple distinct subregister
 /// writes.
 struct SubRegSpillInfo {
-  /// The defining operand being spilled.
-  /// Contains the register, subregister index, and other flags from the
-  /// original definition that needs to be spilled.
-  MachineOperand DefOp;
+  /// Subregister index being spilled.
+  /// This identifies which subreg (e.g., subreg0, subreg1) this entry handles
+  /// across all registers in RegsToSpill.
+  unsigned SubRegIdx;
 
   /// Stack slot allocated for this spill.
   /// Created by VirtRegMap::createSpillSlot() based on the register class
@@ -60,6 +60,8 @@ struct SubRegSpillInfo {
             const TargetRegisterInfo *TRI) const;
 };
 
+using SpillMIAndReg = std::pair<MachineInstr *, Register>;
+
 /// SpillInfo - Encapsulates all information needed to spill a single register.
 ///
 /// This class tracks the original register being spilled, its defining
@@ -79,17 +81,15 @@ class SpillInfo {
 
   SmallVector<SubRegSpillInfo, 8> SubRegSpillInfos;
 
-  SmallVector<std::pair<MachineInstr *, unsigned>, 8> Ops;
-
   /// Instructions after which to insert spill stores.
   /// Spill stores are inserted immediately after the instruction that
   /// defines the value being spilled.
-  SmallVector<MachineInstr *, 8> SpillLocations;
+  SmallVector<std::pair<MachineInstr *, Register>, 8> SpillLocations;
 
   /// Instructions before which to insert reload loads.
-  /// Reload loads are inserted immediately before the instruction that
-  /// uses the spilled value.
-  SmallVector<MachineInstr *, 8> ReloadLocations;
+  /// Reload loads are inserted immediately before the instruction that uses the
+  /// spilled value.
+  SmallVector<std::pair<MachineInstr *, Register>, 8> ReloadLocations;
 
   /// Insert a spill store instruction after the given instruction.
   /// Creates a COPY from the original register to a new virtual register,
@@ -102,9 +102,10 @@ class SpillInfo {
   /// \param TRI Target register info
   /// \param VRM Virtual register map
   /// \param LIS Live intervals
-  void insertSpill(MachineInstr *MI, bool IsKill, MachineRegisterInfo &MRI,
-                   const TargetInstrInfo &TII, const TargetRegisterInfo &TRI,
-                   VirtRegMap &VRM, LiveIntervals &LIS);
+  void insertSpill(MachineInstr *MI, const Register ToSpill, bool IsKill,
+                   MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
+                   const TargetRegisterInfo &TRI, VirtRegMap &VRM,
+                   LiveIntervals &LIS);
 
   /// Insert a reload load instruction before the given instruction.
   /// Loads from stack slots into temporary virtual registers, then copies
@@ -116,25 +117,22 @@ class SpillInfo {
   /// \param TRI Target register info
   /// \param VRM Virtual register map
   /// \param LIS Live intervals
-  Register insertReload(MachineInstr *MI, MachineRegisterInfo &MRI,
-                        const TargetInstrInfo &TII,
-                        const TargetRegisterInfo &TRI, VirtRegMap &VRM,
-                        LiveIntervals &LIS);
+  void insertReload(MachineInstr *MI, Register ToBeReplacedReg,
+                    MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
+                    const TargetRegisterInfo &TRI, VirtRegMap &VRM,
+                    LiveIntervals &LIS);
 
-  void updateVRegOps(ArrayRef<std::pair<MachineInstr *, unsigned>> Ops);
-
-  /// Replace the virtual register in the operands with the given new virtual
-  /// register.
-  ///
-  /// \param NewVReg The new virtual register to replace the old one
-  void replaceVReg(SubregSpiller::VirtRegInfoAndOps &VirtRegInfoAndOps,
-                   Register NewVReg);
+  void updateLIS(MachineBasicBlock::iterator Begin,
+                 MachineBasicBlock::iterator End, LiveIntervals &LIS);
 
 public:
   /// Constructor - Initialize SpillInfo for the given register.
   ///
   /// \param Reg The original register to be spilled
   SpillInfo(Register Reg) : OrigReg(Reg) {}
+
+  void updateDefSubRegs(ArrayRef<Register> RegsToSpill,
+                        const MachineRegisterInfo &MRI);
 
   /// Collect spill and reload information for the given register.
   /// Analyzes all instructions using the register to identify write definitions
@@ -190,6 +188,9 @@ public:
   /// Prints the register, defining operands, stack slots, spill virtual
   /// registers, and spill/reload locations.
   void dump() const;
+
+  void updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
+                 const bool SkipNoInterval = false);
 };
 
 /// AIESubRegSpiller - AIE-specific register spiller.
