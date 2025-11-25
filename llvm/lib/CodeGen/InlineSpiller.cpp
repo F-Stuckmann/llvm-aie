@@ -986,6 +986,27 @@ bool SpillerHelper::isRealSpill(const MachineInstr &Def) {
   return Def.getOperand(0).getSubReg();
 }
 
+bool SpillerHelper::rewriteOperands(
+    ArrayRef<std::pair<MachineInstr *, unsigned>> Ops, Register NewVReg) {
+  // Rewrite instruction operands.
+  bool hasLiveDef = false;
+  for (const auto &OpPair : Ops) {
+    MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
+    LLVM_DEBUG(dbgs() << "Replacing virtual register: " << printReg(MO.getReg())
+                      << " in " << *OpPair.first << " with "
+                      << printReg(NewVReg) << "\n";);
+    MO.setReg(NewVReg);
+    if (MO.isUse()) {
+      if (!OpPair.first->isRegTiedToDefOperand(OpPair.second))
+        MO.setIsKill();
+    } else {
+      if (!MO.isDead())
+        hasLiveDef = true;
+    }
+  }
+  return hasLiveDef;
+}
+
 /// insertSpill - Insert a spill of NewVReg after MI.
 void InlineSpiller::insertSpill(Register NewVReg, bool isKill,
                                 MachineBasicBlock::iterator MI) {
@@ -1099,24 +1120,49 @@ void InlineSpiller::spillAroundUses(Register Reg) {
       insertReload(NewVReg, Idx, &MI);
 
     // Rewrite instruction operands.
-    bool hasLiveDef = false;
-    for (const auto &OpPair : Ops) {
-      MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
-      MO.setReg(NewVReg);
-      if (MO.isUse()) {
-        if (!OpPair.first->isRegTiedToDefOperand(OpPair.second))
-          MO.setIsKill();
-      } else {
-        if (!MO.isDead())
-          hasLiveDef = true;
-      }
-    }
+    const bool hasLiveDef = SpillerHelper::rewriteOperands(Ops, NewVReg);
     LLVM_DEBUG(dbgs() << "\trewrite: " << Idx << '\t' << MI << '\n');
 
     // FIXME: Use a second vreg if instruction has no tied ops.
     if (RI.Writes)
       if (hasLiveDef)
         insertSpill(NewVReg, true, &MI);
+  }
+}
+
+/// deleteSnippetCopies - Delete all snippet copies for the registers being
+/// spilled.
+void InlineSpiller::deleteSnippetCopies() {
+  // Delete the SnippetCopies. Skip if there are no snippet copies collected.
+  if (SnippetCopies.empty())
+    return;
+
+  for (Register Reg : RegsToSpill) {
+    for (MachineInstr &MI :
+         llvm::make_early_inc_range(MRI.reg_instructions(Reg))) {
+      assert(SnippetCopies.count(&MI) && "Remaining use wasn't a snippet copy");
+      // FIXME: Do this with a LiveRangeEdit callback.
+      LIS.getSlotIndexes()->removeSingleMachineInstrFromMaps(MI);
+      MI.eraseFromBundle();
+    }
+  }
+}
+
+/// deleteSpilledVirtualRegs - Delete all spilled virtual registers from the
+/// LiveRangeEdit.
+void InlineSpiller::deleteSpilledVirtualRegs() {
+  // Delete all spilled registers.
+  for (Register Reg : RegsToSpill)
+    Edit->eraseVirtReg(Reg);
+}
+
+/// eliminateDeadDefsIfNeeded - Eliminate dead definitions if any were
+/// generated during spilling.
+void InlineSpiller::eliminateDeadDefs() {
+  // Hoisted spills may cause dead code.
+  if (!DeadDefs.empty()) {
+    LLVM_DEBUG(dbgs() << "Eliminating " << DeadDefs.size() << " dead defs\n");
+    Edit->eliminateDeadDefs(DeadDefs, RegsToSpill);
   }
 }
 
@@ -1148,26 +1194,9 @@ void InlineSpiller::spillAll() {
       VRM.assignVirt2StackSlot(Reg, StackSlot);
   }
 
-  // Hoisted spills may cause dead code.
-  if (!DeadDefs.empty()) {
-    LLVM_DEBUG(dbgs() << "Eliminating " << DeadDefs.size() << " dead defs\n");
-    Edit->eliminateDeadDefs(DeadDefs, RegsToSpill);
-  }
-
-  // Finally delete the SnippetCopies.
-  for (Register Reg : RegsToSpill) {
-    for (MachineInstr &MI :
-         llvm::make_early_inc_range(MRI.reg_instructions(Reg))) {
-      assert(SnippetCopies.count(&MI) && "Remaining use wasn't a snippet copy");
-      // FIXME: Do this with a LiveRangeEdit callback.
-      LIS.getSlotIndexes()->removeSingleMachineInstrFromMaps(MI);
-      MI.eraseFromBundle();
-    }
-  }
-
-  // Delete all spilled registers.
-  for (Register Reg : RegsToSpill)
-    Edit->eraseVirtReg(Reg);
+  eliminateDeadDefs();
+  deleteSnippetCopies();
+  deleteSpilledVirtualRegs();
 }
 
 void InlineSpiller::spill(LiveRangeEdit &edit) {

@@ -353,6 +353,22 @@ protected:
   /// rematerializes the value, or inserts explicit reload/spill instructions.
   void spillAroundUses(Register Reg);
 
+  /// Delete all snippet copies for the registers being spilled.
+  /// Snippet copies connect the main register to snippet registers and become
+  /// redundant after spilling. This method removes them from the instruction
+  /// stream and updates the slot indexes.
+  void deleteSnippetCopies();
+
+  /// Delete all spilled virtual registers from the LiveRangeEdit.
+  /// Called after spilling is complete to remove the virtual registers
+  /// that have been replaced by spills/reloads.
+  void deleteSpilledVirtualRegs();
+
+  /// Eliminate dead definitions if any were generated during spilling.
+  /// Hoisted spills may cause dead code, which is tracked in DeadDefs and
+  /// eliminated here using the LiveRangeEdit's eliminateDeadDefs() method.
+  void eliminateDeadDefs();
+
   /// Spill all registers remaining after rematerialization.
   virtual void spillAll();
 };
@@ -382,6 +398,13 @@ void getVDefInterval(const MachineInstr &MI, LiveIntervals &LIS);
 /// Returns false if Def is an IMPLICIT_DEF with a subregister, indicating
 /// the value is actually undefined and doesn't need to be spilled.
 bool isRealSpill(const MachineInstr &Def);
+
+/// Rewrite instruction operands to use \p NewVReg instead of the old register.
+/// For each operand pair in \p Ops, replaces the register with NewVReg.
+/// Sets kill flags on uses that aren't tied to defs.
+/// \return true if there is at least one def operand that isn't marked dead.
+bool rewriteOperands(ArrayRef<std::pair<MachineInstr *, unsigned>> Ops,
+                     Register NewVReg);
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 /// Dump instruction range [ \p B, \p E) with slot indexes from \p LIS,
