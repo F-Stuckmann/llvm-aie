@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MIRParser/MIParser.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/Spiller.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -131,6 +132,10 @@ cl::opt<bool>
     VectorizePartWordStores("aie-enable-part-store-vect",
                             cl::desc("Enable Part-word store vectorization"),
                             cl::init(true), cl::Hidden);
+
+cl::opt<bool>
+    UseInlineSpiller("aie-use-inline-spiller", cl::Hidden, cl::init(false),
+                     cl::desc("Use InlineSpiller instead of AIESubRegSpiller"));
 
 static StringRef computeDataLayout(const Triple &TT) {
   return "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-"
@@ -401,6 +406,9 @@ Spiller *
 AIEBasePassConfig::createSpiller(const Spiller::RequiredAnalyses &Analyses,
                                  MachineFunction &MF, VirtRegMap &VRM,
                                  VirtRegAuxInfo &VRAI) const {
+  if (UseInlineSpiller)
+    return createInlineSpiller(Analyses, MF, VRM, VRAI);
+
   return new AIESubRegSpiller(Analyses, MF, VRM, VRAI);
 }
 
