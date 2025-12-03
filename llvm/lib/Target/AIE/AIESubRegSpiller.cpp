@@ -92,12 +92,14 @@ void AIESubRegSpiller::spillAll() {
 
   // todo: FIXME: perform optimizations
 
-  LLVM_DEBUG(SI.dump()); // MRI will be auto-fetched from
-                         // SpillLocations/ReloadLocations
+  LLVM_DEBUG(dbgs() << "[SubRegSpiller] SpillInfo: "; SI.dump());
 
   SI.insertReloads(MRI, TII, TRI, VRM, LIS);
   SI.insertSpills(MRI, TII, TRI, VRM, LIS);
   SpillInfos.push_back(SI);
+  LLVM_DEBUG(
+      dbgs() << "[SubRegSpiller] After insertReloads and insertSpills:\n";
+      LIS.dump());
 
   // Update LiveIntervals for the original register and the edited register.
   SmallVector<Register, 2> EditRegs = {SI.getReg()};
@@ -114,15 +116,15 @@ void AIESubRegSpiller::spillAll() {
 }
 
 SpillInfo AIESubRegSpiller::collectSpillInfo() const {
-  LLVM_DEBUG(dbgs() << "Collecting Spill info for " << RegsToSpill.size()
-                    << " regs\n");
+  LLVM_DEBUG(dbgs() << "[SubRegSpiller] Collecting Spill info for "
+                    << RegsToSpill.size() << " regs\n");
 
   // todo: is Edit->getReg() the same as the first RegsToSpill?
   SpillInfo SI(Original);
   SI.updateDefSubRegs(RegsToSpill, MRI);
 
   for (Register Reg : RegsToSpill) {
-    LLVM_DEBUG(dbgs() << "updating Reg " << printReg(Reg) << "\n");
+    LLVM_DEBUG(dbgs() << "  updating Reg " << printReg(Reg) << "\n");
     SI.update(Reg, MRI);
   }
   return SI;
@@ -217,17 +219,22 @@ void SpillInfo::updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
 
     LIS.createAndComputeVirtRegInterval(Reg);
     LIS.shrinkToUses(&LIS.getInterval(Reg));
+    LLVM_DEBUG(dbgs() << "Updated LIS for reg: " << printReg(Reg) << "\n";
+               LIS.getInterval(Reg).dump());
   }
 }
 
 void SpillInfo::updateLIS(MachineBasicBlock::iterator Begin,
                           MachineBasicBlock::iterator End, LiveIntervals &LIS) {
+  LLVM_DEBUG(dbgs() << "Updating LIS for range:\n";);
   LIS.InsertMachineInstrRangeInMaps(Begin, End);
 
   // Collect Defs
   SmallVector<Register, 8> Defs;
   for (const MachineInstr &MI : make_range(Begin, End)) {
+    LLVM_DEBUG(dbgs() << "    " << MI;);
     for (const MachineOperand &MO : MI.all_defs()) {
+      LLVM_DEBUG(dbgs() << "        " << MO << "\n";);
       const Register Reg = MO.getReg();
       Defs.push_back(Reg);
     }
@@ -280,8 +287,6 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
   }
 
   updateLIS(std::next(MI->getIterator()), MIS.end(), LIS);
-
-  LLVM_DEBUG(MBB.dump());
 }
 
 void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
@@ -419,23 +424,4 @@ void SpillInfo::dump() const {
   for (const auto &[MI, _] : ReloadLocations) {
     dbgs() << "    " << *MI;
   }
-
-  // Dump the MachineBasicBlock of SpillLocations and ReloadLocations. Only
-  // dump one if they are the same MBB.
-  const MachineBasicBlock *SpillMBB = nullptr;
-  const MachineBasicBlock *ReloadMBB = nullptr;
-  if (!SpillLocations.empty())
-    SpillMBB = SpillLocations.front().first->getParent();
-  if (!ReloadLocations.empty())
-    ReloadMBB = ReloadLocations.front().first->getParent();
-
-  if (SpillMBB && SpillMBB == ReloadMBB) {
-    dbgs() << "  MBB (Spill/Reload): " << *SpillMBB << "\n";
-  } else {
-    if (SpillMBB)
-      dbgs() << "  Spill MBB: " << *SpillMBB << "\n";
-    if (ReloadMBB)
-      dbgs() << "  Reload MBB: " << *ReloadMBB << "\n";
-  }
-  dbgs() << "\n";
 }

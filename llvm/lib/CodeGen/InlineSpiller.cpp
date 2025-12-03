@@ -971,6 +971,8 @@ void InlineSpiller::insertReload(Register NewVReg, SlotIndex Idx,
   LLVM_DEBUG(SpillerHelper::dumpMachineInstrRangeWithSlotIndex(
       MIS.begin(), MI, LIS, "reload", NewVReg));
   ++NumReloads;
+
+  LLVM_DEBUG(dbgs() << MBB);
 }
 
 /// Check if \p Def fully defines a VReg with an undefined value.
@@ -1076,6 +1078,11 @@ void InlineSpiller::spillAroundUses(Register Reg) {
     // Analyze instruction.
     SmallVector<std::pair<MachineInstr *, unsigned>, 8> Ops;
     VirtRegInfo RI = AnalyzeVirtRegInBundle(MI, Reg, &Ops);
+    LLVM_DEBUG(dbgs() << "  Ops (" << Ops.size() << "):\n";);
+    for (const auto &Op : Ops) {
+      LLVM_DEBUG(dbgs() << "    " << printReg(Op.second) << " " << *Op.first << "\n";);
+    }
+    LLVM_DEBUG(dbgs() << "\n";);
 
     // Find the slot index where this instruction reads and writes OldLI.
     // This is usually the def slot, except for tied early clobbers.
@@ -1152,8 +1159,11 @@ void InlineSpiller::deleteSnippetCopies() {
 /// LiveRangeEdit.
 void InlineSpiller::deleteSpilledVirtualRegs() {
   // Delete all spilled registers.
-  for (Register Reg : RegsToSpill)
+  for (Register Reg : RegsToSpill) {
+    LLVM_DEBUG(dbgs() << "Deleting spilled virtual register: " << printReg(Reg)
+                      << '\n';);
     Edit->eraseVirtReg(Reg);
+  }
 }
 
 /// eliminateDeadDefsIfNeeded - Eliminate dead definitions if any were
@@ -1212,7 +1222,8 @@ void InlineSpiller::spill(LiveRangeEdit &edit) {
   LLVM_DEBUG(dbgs() << "Inline spilling "
                     << TRI.getRegClassName(MRI.getRegClass(edit.getReg()))
                     << ':' << edit.getParent() << "\nFrom original "
-                    << printReg(Original) << '\n');
+                    << printReg(Original) << " with " << printReg(edit.getReg())
+                    << "\n");
   assert(edit.getParent().isSpillable() &&
          "Attempting to spill already spilled value.");
   assert(DeadDefs.empty() && "Previous spill didn't remove dead defs");
