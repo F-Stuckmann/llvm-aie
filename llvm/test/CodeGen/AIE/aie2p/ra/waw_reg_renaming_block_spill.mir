@@ -144,12 +144,12 @@ body:             |
   ; CHECK-NEXT:   renamable $bmlh3 = COPY renamable $x0
   ; CHECK-NEXT:   renamable $s0 = COPY killed renamable $r16
   ; CHECK-NEXT:   $crupsmode = MOV_scalar_imm11_pseudo 1
-  ; CHECK-NEXT:   VST_DM_SPILL killed renamable $dm4, %stack.0, implicit $sp :: (store (s2048) into %stack.0, align 64)
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.3.for.body.i:
   ; CHECK-NEXT:   successors: %bb.4(0x04000000), %bb.3(0x7c000000)
-  ; CHECK-NEXT:   liveins: $dm1:0x000000000000000C, $dm2:0x000000001800000C, $dm3:0x0000000000000004, $r0, $r1, $r2, $r3, $r4, $r5, $r6, $r7, $s0, $x2:0x0000000000000001, $x4, $x6, $y0:0x0000000000000033
+  ; CHECK-NEXT:   liveins: $dm1:0x000000000000000C, $dm2:0x000000001800000C, $dm3:0x0000000000000004, $dm4, $r0, $r1, $r2, $r3, $r4, $r5, $r6, $r7, $s0, $x2:0x0000000000000001, $x4, $x6, $y0:0x0000000000000033
   ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   VST_DM_SPILL killed renamable $dm4, %stack.0, implicit $sp :: (store (s2048) into %stack.0, align 64)
   ; CHECK-NEXT:   renamable $dm4 = VADD_f_vmac_cm2_add_reg renamable $dm1, renamable $dm2, renamable $r1, implicit-def dead $srfpflags, implicit $crfpmask
   ; CHECK-NEXT:   renamable $cml0 = COPY renamable $y0
   ; CHECK-NEXT:   renamable $dm0 = VADD_f_vmac_cm2_add_reg renamable $dm2, renamable $dm0, renamable $r1, implicit-def dead $srfpflags, implicit $crfpmask
@@ -185,7 +185,7 @@ body:             |
   ; CHECK-NEXT:   renamable $wl2 = COPY killed renamable $wh10
   ; CHECK-NEXT:   renamable $bmll3 = COPY killed renamable $x11
   ; CHECK-NEXT:   renamable $dm0 = VMSC_f_vmac_bf_vmul_bf_core_X_X renamable $dm3, renamable $x2, renamable $x4, renamable $r1, implicit-def dead $srfpflags, implicit $crfpmask
-  ; CHECK-NEXT:   renamable $dm0 = VADD_f_vmac_cm2_add_reg killed renamable $dm0, killed renamable $dm4, renamable $r1, implicit-def dead $srfpflags, implicit $crfpmask
+  ; CHECK-NEXT:   renamable $dm0 = VADD_f_vmac_cm2_add_reg killed renamable $dm0, renamable $dm4, renamable $r1, implicit-def dead $srfpflags, implicit $crfpmask
   ; CHECK-NEXT:   renamable $y4 = COPY killed renamable $cml0
   ; CHECK-NEXT:   renamable $wh8 = COPY renamable $wh2
   ; CHECK-NEXT:   renamable $r16 = XOR renamable $r0, renamable $r7

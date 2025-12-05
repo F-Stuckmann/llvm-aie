@@ -110,7 +110,6 @@ void AIESubRegSpiller::spillAll() {
   // todo: why not include Edit->getReg() in RegsToSpill?
   RegsToSpill.emplace_back(SI.getReg());
 
-  deleteSpilledVirtualRegs();
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] After deleteSpilledVirtualRegs:\n";
              LIS.dump());
 }
@@ -264,26 +263,33 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
     assert(!IsSubReg || IsSubReg && OrigRC != RC &&
                             "Subreg RC should be different from OrigRC");
 
-    // Create a new virtual register
-    Register NewVReg = MRI.createVirtualRegister(RC);
-    Info.SpillVRegs.push_back(NewVReg);
+    Register RegToStore{0};
+    bool StoreIsKill = IsKill;
 
-    // Create COPY: NewVReg = COPY OrigReg:subreg
-    auto CopyBuilder = BuildMI(MBB, SpillBefore, MI->getDebugLoc(),
-                               TII.get(TargetOpcode::COPY), NewVReg);
-    CopyBuilder.addReg(ToSpill, getKillRegState(IsKill), Info.SubRegIdx);
+    if (IsSubReg) {
+      // Create a new virtual register
+      Register NewVReg = MRI.createVirtualRegister(RC);
+      Info.SpillVRegs.push_back(NewVReg);
 
-    // Assign the new virtual register to the stack slot
-    VRM.assignVirt2StackSlot(NewVReg, StackSlot);
+      // Create COPY: NewVReg = COPY OrigReg:subreg
+      auto CopyBuilder = BuildMI(MBB, SpillBefore, MI->getDebugLoc(),
+                                 TII.get(TargetOpcode::COPY), NewVReg);
+      CopyBuilder.addReg(ToSpill, getKillRegState(IsKill), Info.SubRegIdx);
 
-    // Store the new virtual register to the stack slot
-    TII.storeRegToStackSlot(MBB, SpillBefore, NewVReg, true, StackSlot, RC,
-                            &TRI, Register());
+      // Assign the new virtual register to the stack slot
+      VRM.assignVirt2StackSlot(NewVReg, StackSlot);
 
-    if (IsSubReg)
+      RegToStore = NewVReg;
+      StoreIsKill = true;
       NumSubRegSpills++;
-    else
+    } else {
+      RegToStore = ToSpill;
       NumSpills++;
+    }
+
+    // Store the register to the stack slot
+    TII.storeRegToStackSlot(MBB, SpillBefore, RegToStore, StoreIsKill,
+                            StackSlot, RC, &TRI, Register());
   }
 
   updateLIS(std::next(MI->getIterator()), MIS.end(), LIS);
@@ -319,24 +325,31 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     assert(!SubRegIdx || SubRegIdx && OrigRC != RC &&
                              "Subreg RC should be different from OrigRC");
 
-    // Create temp register and assign to stack slot
-    Register TempReg = MRI.createVirtualRegister(RC);
-    VRM.assignVirt2StackSlot(TempReg, StackSlot);
+    Register RegToLoad{0};
+    if (IsSubReg) {
+      // Create temp register and assign to stack slot
+      Register TempReg = MRI.createVirtualRegister(RC);
+      VRM.assignVirt2StackSlot(TempReg, StackSlot);
+      RegToLoad = TempReg;
+      NumSubRegReloads++;
+    } else {
+      RegToLoad = NewVReg;
+      VRM.assignVirt2StackSlot(RegToLoad, StackSlot);
+      NumReloads++;
+    }
 
     // Load from stack slot
-    TII.loadRegFromStackSlot(MBB, MI, TempReg, StackSlot, RC, &TRI, Register());
+    TII.loadRegFromStackSlot(MBB, MI, RegToLoad, StackSlot, RC, &TRI,
+                             Register());
 
-    // Copy from the temporary to the parent register's subregister
-    auto CopyMIBuilder =
-        BuildMI(MBB, MI, MI->getDebugLoc(), TII.get(TargetOpcode::COPY))
-            .addReg(NewVReg, RegState::Define | AdditionalFlag, SubRegIdx)
-            .addReg(TempReg, RegState::Kill);
-    LLVM_DEBUG(dbgs() << "Inserted: " << *CopyMIBuilder.getInstr());
-
-    if (IsSubReg)
-      NumSubRegReloads++;
-    else
-      NumReloads++;
+    if (IsSubReg) {
+      // Copy from the temporary to the parent register's subregister
+      auto CopyMIBuilder =
+          BuildMI(MBB, MI, MI->getDebugLoc(), TII.get(TargetOpcode::COPY))
+              .addReg(NewVReg, RegState::Define | AdditionalFlag, SubRegIdx)
+              .addReg(RegToLoad, RegState::Kill);
+      LLVM_DEBUG(dbgs() << "Inserted: " << *CopyMIBuilder.getInstr());
+    }
   }
   // Replace Old Register with reloaded Copy Register (NewVReg)
   SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
