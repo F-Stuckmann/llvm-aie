@@ -276,16 +276,17 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
                                  TII.get(TargetOpcode::COPY), NewVReg);
       CopyBuilder.addReg(ToSpill, getKillRegState(IsKill), Info.SubRegIdx);
 
-      // Assign the new virtual register to the stack slot
-      VRM.assignVirt2StackSlot(NewVReg, StackSlot);
-
       RegToStore = NewVReg;
       StoreIsKill = true;
       NumSubRegSpills++;
     } else {
       RegToStore = ToSpill;
+      // todo: remove this codepath, use regular inlinespiller
       NumSpills++;
     }
+
+    // Assign the new RegToStore to the stack slot
+    VRM.assignVirt2StackSlot(RegToStore, StackSlot);
 
     // Store the register to the stack slot
     TII.storeRegToStackSlot(MBB, SpillBefore, RegToStore, StoreIsKill,
@@ -328,15 +329,14 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     Register RegToLoad{0};
     if (IsSubReg) {
       // Create temp register and assign to stack slot
-      Register TempReg = MRI.createVirtualRegister(RC);
-      VRM.assignVirt2StackSlot(TempReg, StackSlot);
-      RegToLoad = TempReg;
+      RegToLoad = MRI.createVirtualRegister(RC);
       NumSubRegReloads++;
     } else {
+      // todo: remove this codepath, use regular inlinespiller
       RegToLoad = NewVReg;
-      VRM.assignVirt2StackSlot(RegToLoad, StackSlot);
       NumReloads++;
     }
+    VRM.assignVirt2StackSlot(RegToLoad, StackSlot);
 
     // Load from stack slot
     TII.loadRegFromStackSlot(MBB, MI, RegToLoad, StackSlot, RC, &TRI,
