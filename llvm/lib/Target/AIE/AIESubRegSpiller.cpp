@@ -246,11 +246,20 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
                             const TargetInstrInfo &TII,
                             const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                             LiveIntervals &LIS) {
+  // Collect MOs of the original register.
+  SubregSpiller::VirtRegInfoAndOps VRIAndOps =
+      getVirtRegInfoAndOps(*MI, ToSpill);
+
   MachineBasicBlock &MBB = *MI->getParent();
   MachineInstrSpan MIS(MI, &MBB);
   MachineBasicBlock::iterator SpillBefore = std::next(MI->getIterator());
 
-  const TargetRegisterClass *OrigRC = MRI.getRegClass(ToSpill);
+  // Create a new virtual register for the parent register
+  const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
+  Register NewVReg = MRI.createVirtualRegister(OrigRC);
+
+  // Replace the original def operand with the new register
+  SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
 
   for (auto &Info : SubRegSpillInfos) {
     int StackSlot = Info.StackSlot;
@@ -268,19 +277,19 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
 
     if (IsSubReg) {
       // Create a new virtual register
-      Register NewVReg = MRI.createVirtualRegister(RC);
-      Info.SpillVRegs.push_back(NewVReg);
+      Register TempVReg = MRI.createVirtualRegister(RC);
+      Info.SpillVRegs.push_back(TempVReg);
 
-      // Create COPY: NewVReg = COPY OrigReg:subreg
+      // Create COPY: TempVReg = COPY NewVReg:subreg
       auto CopyBuilder = BuildMI(MBB, SpillBefore, MI->getDebugLoc(),
-                                 TII.get(TargetOpcode::COPY), NewVReg);
-      CopyBuilder.addReg(ToSpill, getKillRegState(IsKill), Info.SubRegIdx);
+                                 TII.get(TargetOpcode::COPY), TempVReg);
+      CopyBuilder.addReg(NewVReg, getKillRegState(IsKill), Info.SubRegIdx);
 
-      RegToStore = NewVReg;
+      RegToStore = TempVReg;
       StoreIsKill = true;
       NumSubRegSpills++;
     } else {
-      RegToStore = ToSpill;
+      RegToStore = NewVReg;
       // todo: remove this codepath, use regular inlinespiller
       NumSpills++;
     }
