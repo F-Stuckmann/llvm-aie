@@ -107,7 +107,7 @@ body:             |
     ; CHECK-LABEL: name: spill_to_mem_caller_saved
     ; CHECK: liveins: $s0
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: renamable $r0 = COPY $s0
+    ; CHECK-NEXT: renamable $r0 = COPY killed renamable $s0
     ; CHECK-NEXT: ST_R_SPILL killed renamable $r0, %stack.0, implicit $sp :: (store (s32) into %stack.0)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $r0 = LDA_R_SPILL %stack.0, implicit $sp :: (load (s32) from %stack.0)

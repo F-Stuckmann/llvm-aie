@@ -31,11 +31,9 @@ body:             |
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $amhh0
     %0:acc256 = VLDA_dmw_lda_am_ag_idx_imm $p0, 0 ; -> only $amll0 is available
 
-    ; spill $amll0 before it is re-defined and used
     $amll0 = COPY $amll1
     VST_dmw_sts_am_ag_idx_imm $amll0, $p0, 0, implicit $amll1, implicit $amll2, implicit $amll3, implicit $amll4, implicit $amll5, implicit $amll6, implicit $amll7, implicit $amll8, implicit $amhl0, implicit $amhl1, implicit $amhl2, implicit $amhl3, implicit $amhl4, implicit $amhl5, implicit $amhl6, implicit $amhl7, implicit $amhl8, implicit $amlh0, implicit $amlh1, implicit $amlh2, implicit $amlh3, implicit $amlh4, implicit $amlh5, implicit $amlh6, implicit $amlh7, implicit $amlh8, implicit $amhh0, implicit $amhh1, implicit $amhh2, implicit $amhh3, implicit $amhh4, implicit $amhh5, implicit $amhh6, implicit $amhh7, implicit $amhh8
 
-    ; reload %0 / $ amll0 before PseudoRET
     PseudoRET implicit $lr, implicit %0
 ...
 
@@ -86,11 +84,9 @@ body:             |
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $bmh0
     %0:acc512 = COPY $x0 ; -> only $bml0 is available
 
-    ; spill $bml0 before it is re-defined and used
     $bml0 = COPY $bml1
     ST_dms_sts_idx_imm $r0, $p0, 0, implicit $bml0, implicit $bml1, implicit $bml2, implicit $bml3, implicit $bml4, implicit $bml5, implicit $bml6, implicit $bml7, implicit $bml8, implicit $bmh0, implicit $bmh1, implicit $bmh2, implicit $bmh3, implicit $bmh4, implicit $bmh5, implicit $bmh6, implicit $bmh7, implicit $bmh8
 
-    ; reload %0 / $bml0 before PseudoRET
     PseudoRET implicit $lr, implicit %0
 ...
 
@@ -141,11 +137,9 @@ body:             |
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $cm0
     %0:acc1024 = COPY $y2 ; -> only $cm0 is available
 
-    ; spill $cm0 before it is re-defined and used
     $cm0 = COPY $cm1
     ST_dms_sts_idx_imm $r0, $p0, 0, implicit $cm0, implicit $cm1, implicit $cm2, implicit $cm3, implicit $cm4, implicit $cm5, implicit $cm6, implicit $cm7, implicit $cm8
 
-    ; reload %0 / $cm0 before PseudoRET
     PseudoRET implicit $lr, implicit %0
 ...
 

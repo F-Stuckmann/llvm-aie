@@ -23,7 +23,7 @@ body:             |
   ; CHECK-NEXT:   liveins: $p0
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   renamable $r0 = MOV_RLC_imm11_pseudo 0
-  ; CHECK-NEXT:   renamable $x0 = VBCST_16 killed renamable $r0
+  ; CHECK-NEXT:   renamable $x2 = VBCST_16 killed renamable $r0
   ; CHECK-NEXT:   renamable $m0 = MOV_PD_imm11_pseudo 0
   ; CHECK-NEXT:   renamable $p6 = COPY $p0
   ; CHECK-NEXT:   renamable $dj0 = COPY renamable $m0
@@ -33,14 +33,14 @@ body:             |
   ; CHECK-NEXT:   renamable $dc4 = COPY renamable $m0
   ; CHECK-NEXT:   renamable $dc0 = COPY renamable $m0
   ; CHECK-NEXT:   renamable $p7 = MOV_PD_imm11_pseudo 0
-  ; CHECK-NEXT:   VST_512_COMPOSED_REG_SPILL renamable $x0, %stack.2, implicit $sp :: (store (s512) into %stack.2)
+  ; CHECK-NEXT:   renamable $x0 = COPY renamable $x2
+  ; CHECK-NEXT:   VST_dmx_sts_x_spill killed renamable $x0, %stack.0, implicit $sp :: (store (s512) into %stack.0)
   ; CHECK-NEXT:   renamable $dc1 = COPY renamable $m0
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.1:
   ; CHECK-NEXT:   successors: %bb.1(0x80000000)
-  ; CHECK-NEXT:   liveins: $dc0, $dc1, $dc4, $dj0, $dj1, $dn1, $dn4, $m0, $p6, $p7, $x0
+  ; CHECK-NEXT:   liveins: $dc0, $dc1, $dc4, $dj0, $dj1, $dn1, $dn4, $m0, $p6, $p7, $x2
   ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   VST_512_COMPOSED_REG_SPILL killed renamable $x0, %stack.3, implicit $sp :: (store (s512) into %stack.3)
   ; CHECK-NEXT:   renamable $r0 = LDA_u16_idx_imm renamable $p7, 0 :: (load (s16) from `ptr null`, align 8)
   ; CHECK-NEXT:   renamable $p0 = MOV_PD_imm11_pseudo 0
   ; CHECK-NEXT:   $r1 = MOV_RLC_imm11_pseudo 1
@@ -49,19 +49,34 @@ body:             |
   ; CHECK-NEXT:   renamable $dj4 = COPY renamable $dj0
   ; CHECK-NEXT:   dead $p0, $dc0, $dc4 = PADD_3D_pseudo_split killed $p0, $m0, killed $dn0, $dj0, killed $dc0, undef $m4, $dn4, killed $dj4, killed $dc4
   ; CHECK-NEXT:   ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
-  ; CHECK-NEXT:   ST_DS_SPILL renamable $d0_3d, %stack.0, implicit $sp :: (store (s256) into %stack.0, align 4)
-  ; CHECK-NEXT:   ST_D_SPILL renamable $d1, %stack.1, implicit $sp :: (store (s128) into %stack.1, align 4)
+  ; CHECK-NEXT:   renamable $r8 = COPY killed renamable $dc0
+  ; CHECK-NEXT:   renamable $r9 = COPY killed renamable $dj0
+  ; CHECK-NEXT:   renamable $r10 = COPY killed renamable $m0
+  ; CHECK-NEXT:   renamable $r11 = COPY killed renamable $dc4
+  ; CHECK-NEXT:   renamable $r12 = COPY killed renamable $dn4
+  ; CHECK-NEXT:   renamable $r13 = COPY killed renamable $dc1
+  ; CHECK-NEXT:   renamable $r14 = COPY killed renamable $dn1
+  ; CHECK-NEXT:   renamable $r15 = COPY killed renamable $dj1
+  ; CHECK-NEXT:   VST_dmx_sts_x_spill killed renamable $x2, %stack.1, implicit $sp :: (store (s512) into %stack.1)
   ; CHECK-NEXT:   PseudoJL &__umodsi3, csr_aie2p, implicit-def $lr, implicit killed $r1, implicit killed $r2, implicit-def $r0
-  ; CHECK-NEXT:   renamable $d1 = LDA_D_SPILL %stack.1, implicit $sp :: (load (s128) from %stack.1, align 4)
-  ; CHECK-NEXT:   renamable $d0_3d = LDA_DS_SPILL %stack.0, implicit $sp :: (load (s256) from %stack.0, align 4)
+  ; CHECK-NEXT:   renamable $dc1 = COPY killed renamable $r13
+  ; CHECK-NEXT:   internal renamable $dn1 = COPY renamable $r14
+  ; CHECK-NEXT:   internal renamable $dj1 = COPY renamable $r15
+  ; CHECK-NEXT:   renamable $dc0 = COPY killed renamable $r8
+  ; CHECK-NEXT:   internal renamable $dj0 = COPY renamable $r9
+  ; CHECK-NEXT:   internal renamable $m0 = COPY renamable $r10
+  ; CHECK-NEXT:   internal renamable $dc4 = COPY renamable $r11
+  ; CHECK-NEXT:   internal renamable $dn4 = COPY renamable $r12
   ; CHECK-NEXT:   renamable $r0 = EQZ killed renamable $r0
-  ; CHECK-NEXT:   renamable $x0 = VLDA_dmx_lda_x_spill %stack.2, implicit $sp :: (load (s512) from %stack.2)
+  ; CHECK-NEXT:   renamable $x0 = VLDA_dmx_lda_x_spill %stack.0, implicit $sp :: (load (s512) from %stack.0)
+  ; CHECK-NEXT:   VST_dmx_sts_x_spill killed renamable $x0, %stack.0, implicit $sp :: (store (s512) into %stack.0)
+  ; CHECK-NEXT:   renamable $x0 = VLDA_dmx_lda_x_spill %stack.0, implicit $sp :: (load (s512) from %stack.0)
   ; CHECK-NEXT:   renamable $x0 = VINSERT_16_mIdxImm0 killed renamable $x0, killed renamable $r0
   ; CHECK-NEXT:   ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
-  ; CHECK-NEXT:   renamable $x2 = VLDA_dmx_lda_x_spill %stack.3, implicit $sp :: (load (s512) from %stack.3)
+  ; CHECK-NEXT:   renamable $x2 = VLDA_dmx_lda_x_spill %stack.1, implicit $sp :: (load (s512) from %stack.1)
   ; CHECK-NEXT:   renamable $x2 = VBOR killed renamable $x0, killed renamable $x2
-  ; CHECK-NEXT:   VST_dmx_sts_x_spill killed renamable $x2, %stack.3, implicit $sp :: (store (s512) into %stack.3)
-  ; CHECK-NEXT:   renamable $x0 = VLDA_dmx_lda_x_spill %stack.3, implicit $sp :: (load (s512) from %stack.3)
+  ; CHECK-NEXT:   VST_dmx_sts_x_spill killed renamable $x2, %stack.1, implicit $sp :: (store (s512) into %stack.1)
+  ; CHECK-NEXT:   renamable $x2 = VLDA_dmx_lda_x_spill %stack.1, implicit $sp :: (load (s512) from %stack.1)
   ; CHECK-NEXT:   renamable $m1 = COPY renamable $m0
   ; CHECK-NEXT:   renamable $p0 = COPY renamable $p6
   ; CHECK-NEXT:   dead $p0, $dc1 = PADD_2D_pseudo_split killed $p0, killed $m1, $dn1, $dj1, killed $dc1

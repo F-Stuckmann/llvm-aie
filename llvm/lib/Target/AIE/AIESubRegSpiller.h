@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TARGET_AIE_AIESUBREGSPILLER_H
 #define LLVM_LIB_TARGET_AIE_AIESUBREGSPILLER_H
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/InlineSpiller.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
@@ -62,6 +63,23 @@ struct SubRegSpillInfo {
 
 using SpillMIAndReg = std::pair<MachineInstr *, Register>;
 
+/// RenameTracker - Tracks register renames during spill/reload processing.
+///
+/// This class tracks {MachineInstr*, OldReg} -> NewVReg mappings to handle
+/// tied operands correctly. When a reload renames a register, the spill
+/// processing can look up the mapping to avoid double-renaming.
+class RenameTracker {
+  DenseMap<std::pair<MachineInstr *, Register>, Register> Renames;
+
+public:
+  /// Record that OldReg was renamed to NewVReg in the given instruction.
+  void recordRename(MachineInstr *MI, Register OldReg, Register NewVReg);
+
+  /// Look up if OldReg was already renamed in the given instruction.
+  /// Returns the new register if found, or an invalid register otherwise.
+  Register getRenamedReg(MachineInstr *MI, Register OldReg) const;
+};
+
 /// SpillInfo - Encapsulates all information needed to spill a single register.
 ///
 /// This class tracks the original register being spilled, its defining
@@ -90,6 +108,20 @@ class SpillInfo {
   /// Reload loads are inserted immediately before the instruction that uses the
   /// spilled value.
   SmallVector<std::pair<MachineInstr *, Register>, 8> ReloadLocations;
+
+  /// Tracks register renames to handle tied operands.
+  /// When a reload renames a register, the spill can look up the new name
+  /// to avoid double-renaming.
+  RenameTracker Renames;
+
+  ///  Registers that need LiveInterval updates after all
+  ///  spills/reloads are
+  /// inserted. We defer LIS computation until all instructions are in place
+  /// to ensure intervals are computed correctly for tied operands. Reason: Once
+  /// a Dead flag is added, it is not possible to remove it afterwards
+  ///  with a LI update! Therefore, only update LIS once all regs have been
+  ///  added.
+  SmallVector<Register, 16> RegsForLISUpdate;
 
   /// Insert a spill store instruction after the given instruction.
   /// Creates a COPY from the original register to a new virtual register,
@@ -123,7 +155,8 @@ class SpillInfo {
                     LiveIntervals &LIS);
 
   void updateLIS(MachineBasicBlock::iterator Begin,
-                 MachineBasicBlock::iterator End, LiveIntervals &LIS);
+                 MachineBasicBlock::iterator End, LiveIntervals &LIS,
+                 const bool ConsiderBeginInLISUpdate = false);
 
 public:
   /// Constructor - Initialize SpillInfo for the given register.
@@ -183,6 +216,11 @@ public:
   ///
   /// \return The original register
   Register getReg() const { return OrigReg; }
+
+  /// Get the registers that need LiveInterval updates.
+  ///
+  /// \return Array of registers needing LIS updates
+  ArrayRef<Register> getRegsForLISUpdate() const { return RegsForLISUpdate; }
 
   /// Dump the SpillInfo for debugging purposes.
   /// Prints the register, defining operands, stack slots, spill virtual

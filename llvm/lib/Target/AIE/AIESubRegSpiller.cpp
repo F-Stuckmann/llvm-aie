@@ -60,6 +60,18 @@ SubregSpiller::VirtRegInfoAndOps getVirtRegInfoAndOps(MachineInstr &MI,
 
 } // namespace
 
+void RenameTracker::recordRename(MachineInstr *MI, Register OldReg,
+                                 Register NewVReg) {
+  Renames[{MI, OldReg}] = NewVReg;
+}
+
+Register RenameTracker::getRenamedReg(MachineInstr *MI, Register OldReg) const {
+  auto It = Renames.find({MI, OldReg});
+  if (It != Renames.end())
+    return It->second;
+  return Register();
+}
+
 void SubregSpiller::VirtRegInfoAndOps::dump(
     const MachineRegisterInfo *MRI, const TargetRegisterInfo *TRI) const {
   dbgs() << "VirtRegInfoAndOps:\n";
@@ -96,6 +108,12 @@ void AIESubRegSpiller::spillAll() {
 
   SI.insertReloads(MRI, TII, TRI, VRM, LIS);
   SI.insertSpills(MRI, TII, TRI, VRM, LIS);
+
+  // Update LIS for all newly created registers. This is deferred until after
+  // all spills/reloads are inserted so intervals are computed correctly
+  // (especially for tied operands where reload and spill share the same reg).
+  SI.updateLIS(SI.getRegsForLISUpdate(), LIS);
+
   SpillInfos.push_back(SI);
   LLVM_DEBUG(
       dbgs() << "[SubRegSpiller] After insertReloads and insertSpills:\n";
@@ -236,13 +254,17 @@ void SpillInfo::updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
 }
 
 void SpillInfo::updateLIS(MachineBasicBlock::iterator Begin,
-                          MachineBasicBlock::iterator End, LiveIntervals &LIS) {
+                          MachineBasicBlock::iterator End, LiveIntervals &LIS,
+                          const bool ConsiderBeginInLISUpdate) {
   LLVM_DEBUG(dbgs() << "Updating LIS for range:\n";);
   LIS.InsertMachineInstrRangeInMaps(Begin, End);
 
+  const MachineBasicBlock::iterator StartDefMI =
+      ConsiderBeginInLISUpdate ? std::prev(Begin) : Begin;
+
   // Collect Defs
   SmallVector<Register, 8> Defs;
-  for (const MachineInstr &MI : make_range(Begin, End)) {
+  for (const MachineInstr &MI : make_range(StartDefMI, End)) {
     LLVM_DEBUG(dbgs() << "    " << MI;);
     for (const MachineOperand &MO : MI.all_defs()) {
       LLVM_DEBUG(dbgs() << "        " << MO << "\n";);
@@ -258,20 +280,32 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
                             const TargetInstrInfo &TII,
                             const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                             LiveIntervals &LIS) {
-  // Collect MOs of the original register.
-  SubregSpiller::VirtRegInfoAndOps VRIAndOps =
-      getVirtRegInfoAndOps(*MI, ToSpill);
-
   MachineBasicBlock &MBB = *MI->getParent();
   MachineInstrSpan MIS(MI, &MBB);
   MachineBasicBlock::iterator SpillBefore = std::next(MI->getIterator());
 
-  // Create a new virtual register for the parent register
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
-  Register NewVReg = MRI.createVirtualRegister(OrigRC);
+  Register NewVReg;
+  bool IsTiedCase = false;
 
-  // Replace the original def operand with the new register
-  SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
+  // Check if this register was already renamed by insertReload (tied case)
+  if (Register RenamedReg = Renames.getRenamedReg(MI, ToSpill);
+      RenamedReg.isValid()) {
+    LLVM_DEBUG(dbgs() << "Tied instruction case: using already renamed reg "
+                      << printReg(RenamedReg) << "\n");
+    NewVReg = RenamedReg;
+    IsTiedCase = true;
+    // Skip rewriteOperands - already done by insertReload
+  } else {
+    // Collect MOs of the original register
+    SubregSpiller::VirtRegInfoAndOps VRIAndOps =
+        getVirtRegInfoAndOps(*MI, ToSpill);
+    // Create a new virtual register for the parent register
+    NewVReg = MRI.createVirtualRegister(OrigRC);
+    RegsForLISUpdate.push_back(NewVReg);
+    // Replace the original def operand with the new register
+    SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
+  }
 
   for (auto &Info : SubRegSpillInfos) {
     int StackSlot = Info.StackSlot;
@@ -291,6 +325,7 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
       // Create a new virtual register
       Register TempVReg = MRI.createVirtualRegister(RC);
       Info.SpillVRegs.push_back(TempVReg);
+      RegsForLISUpdate.push_back(TempVReg);
 
       // Create COPY: TempVReg = COPY NewVReg:subreg
       auto CopyBuilder = BuildMI(MBB, SpillBefore, MI->getDebugLoc(),
@@ -306,15 +341,19 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
       NumSpills++;
     }
 
-    // Assign the new RegToStore to the stack slot
-    VRM.assignVirt2StackSlot(RegToStore, StackSlot);
+    // In tied case without subreg, NewVReg was already assigned by reload.
+    bool AlreadyAssigned = IsTiedCase && !IsSubReg;
+    if (!AlreadyAssigned)
+      VRM.assignVirt2StackSlot(RegToStore, StackSlot);
 
     // Store the register to the stack slot
     TII.storeRegToStackSlot(MBB, SpillBefore, RegToStore, StoreIsKill,
                             StackSlot, RC, &TRI, Register());
   }
 
-  updateLIS(std::next(MI->getIterator()), MIS.end(), LIS);
+  // Register new instructions in LIS maps, but defer interval computation
+  // until all spills/reloads are inserted (handled in spillAll).
+  LIS.InsertMachineInstrRangeInMaps(std::next(MI->getIterator()), MIS.end());
 }
 
 void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
@@ -332,6 +371,7 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   // Create a new virtual register for the parent register
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
   Register NewVReg = MRI.createVirtualRegister(OrigRC);
+  RegsForLISUpdate.push_back(NewVReg);
 
   for (unsigned I = 0; I < SubRegSpillInfos.size(); I++) {
     auto &Info = SubRegSpillInfos[I];
@@ -351,6 +391,7 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     if (IsSubReg) {
       // Create temp register and assign to stack slot
       RegToLoad = MRI.createVirtualRegister(RC);
+      RegsForLISUpdate.push_back(RegToLoad);
       NumSubRegReloads++;
     } else {
       // todo: remove this codepath, use regular inlinespiller
@@ -375,8 +416,12 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   // Replace Old Register with reloaded Copy Register (NewVReg)
   SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
 
-  // Update LIS, now that all newly inserted Copy Regs have been attached.
-  updateLIS(MIS.begin(), MI, LIS);
+  // Record the rename so insertSpill can find it for tied operands
+  Renames.recordRename(MI, ToBeReplacedReg, NewVReg);
+
+  // Register new instructions in LIS maps, but defer interval computation
+  // until all spills/reloads are inserted (handled in spillAll).
+  LIS.InsertMachineInstrRangeInMaps(MIS.begin(), MI->getIterator());
 }
 
 void SpillInfo::insertSpills(MachineRegisterInfo &MRI,

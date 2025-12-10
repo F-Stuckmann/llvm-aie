@@ -526,10 +526,14 @@ define dso_local noundef <16 x float> @_Z13test_upd_elemDv16_fif(<16 x float> no
 ; CHECK-NEXT:    st lr, [sp, #-124] // 4-byte Folded Spill Delay Slot 3
 ; CHECK-NEXT:    vst x2, [sp, #-64] // 64-byte Folded Spill Delay Slot 2
 ; CHECK-NEXT:    mov r8, r0 // Delay Slot 1
-; CHECK-NEXT:    lda lr, [sp, #-124]; nopxm // 4-byte Folded Reload
+; CHECK-NEXT:    vlda x0, [sp, #-64]; nopb ; nopxm ; nops // 64-byte Folded Reload
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    nop
+; CHECK-NEXT:    lda lr, [sp, #-124] // 4-byte Folded Reload
+; CHECK-NEXT:    nop
+; CHECK-NEXT:    nop
+; CHECK-NEXT:    vst x0, [sp, #-64] // 64-byte Folded Spill
 ; CHECK-NEXT:    vlda x0, [sp, #-64] // 64-byte Folded Reload
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    lda r8, [sp, #-128] // 4-byte Folded Reload
