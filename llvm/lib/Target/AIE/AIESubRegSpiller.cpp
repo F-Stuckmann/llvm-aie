@@ -198,14 +198,21 @@ void SpillInfo::update(const Register Reg, MachineRegisterInfo &MRI) {
 
     // Analyze instruction.
     const auto [RegInfo, Ops] = getVirtRegInfoAndOps(MI, Reg);
+    SpillMIAndReg Entry = {&MI, Reg};
+
+    if (llvm::is_contained(SpillLocations, Entry))
+      // Tied VRegs are encountered multiple times, we only have to add them
+      // once.
+      continue;
+
     if (RegInfo.Writes) {
       LLVM_DEBUG(dbgs() << "Adding spill location: " << MI);
-      SpillLocations.push_back({&MI, Reg});
+      SpillLocations.push_back(Entry);
     }
 
     if (RegInfo.Reads) {
       LLVM_DEBUG(dbgs() << "Adding reload location: " << MI);
-      ReloadLocations.push_back({&MI, Reg});
+      ReloadLocations.push_back(Entry);
     }
   }
 }
