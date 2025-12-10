@@ -107,9 +107,14 @@ void AIESubRegSpiller::spillAll() {
     EditRegs.push_back(Edit->getReg());
   SI.updateLIS(EditRegs, LIS, true);
 
-  // todo: why not include Edit->getReg() in RegsToSpill?
-  RegsToSpill.emplace_back(SI.getReg());
-
+  // The VReg being spilled has not yet been allocated to a Physical Register.
+  // Due to a lack of high level methods we cannot tell RegAlloc to put the
+  // Original VReg back on the allocation queue.
+  // Therefore, we delete the spilled virtual register and create new VRegs
+  // for the shorted LiveIntervals between Spill/Reload and Def/Use of the
+  // original register. MRI will take care of notifying RegAlloc to enque the
+  // new VRegs.
+  deleteSpilledVirtualRegs();
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] After deleteSpilledVirtualRegs:\n";
              LIS.dump());
 }
