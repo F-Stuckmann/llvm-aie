@@ -32,6 +32,7 @@
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
+#include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/MIRParser/MIParser.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/Spiller.h"
@@ -409,7 +410,12 @@ AIEBasePassConfig::createSpiller(const Spiller::RequiredAnalyses &Analyses,
   if (UseInlineSpiller)
     return createInlineSpiller(Analyses, MF, VRM, VRAI);
 
-  return new AIESubRegSpiller(Analyses, MF, VRM, VRAI);
+  // LiveRegMatrix is required by the register allocator that calls
+  // createSpiller
+  auto *LRMWrapper = getAnalysisIfAvailable<LiveRegMatrixWrapperLegacy>();
+  assert(LRMWrapper &&
+         "LiveRegMatrix must be available from register allocator");
+  return new AIESubRegSpiller(Analyses, MF, VRM, VRAI, LRMWrapper->getLRM());
 }
 
 std::unique_ptr<CSEConfigBase> AIEBasePassConfig::getCSEConfig() const {

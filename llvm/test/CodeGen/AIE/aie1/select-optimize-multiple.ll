@@ -4,7 +4,7 @@
 ; See https://llvm.org/LICENSE.txt for license information.
 ; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 ;
-; (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its affiliates
+; (c) Copyright 2023-2025 Advanced Micro Devices, Inc. or its affiliates
 ; RUN: llc -mtriple=aie --issue-limit=1 < %s | FileCheck %s
 ; RUN: llc -mtriple=aie --issue-limit=1 -verify-machineinstrs < %s \
 ; RUN:  |  FileCheck %s
@@ -322,10 +322,8 @@ define i32 @cmovdiffcc(i1 zeroext %a, i1 zeroext %b, i32 %c, i32 %d, i32 %e, i32
 ; CHECK:         .p2align 4
 ; CHECK-NEXT:  // %bb.0: // %entry
 ; CHECK-NEXT:    padda [sp], #32
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    st.spil r7, [sp, #-28] // 4-byte Folded Spill
+; CHECK-NEXT:    mov r0, r7
 ; CHECK-NEXT:    lda.spil r12, [sp, #-40]
-; CHECK-NEXT:    lda.spil r0, [sp, #-28] // 4-byte Folded Reload
 ; CHECK-NEXT:    st.spil r6, [sp, #-32] // 4-byte Folded Spill
 ; CHECK-NEXT:    lda.spil r13, [sp, #-36]
 ; CHECK-NEXT:    nop

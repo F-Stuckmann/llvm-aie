@@ -263,6 +263,7 @@ void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
                          VirtRegMap &VRM, LiveRegMatrix &LRM,
                          LiveIntervals &LIS) {
   for (Register R : RegistersToRepair) {
+    assert(R.isVirtual() && "Repairing physical registers is not supported");
 
     if (!LIS.hasInterval(R))
       continue;
@@ -283,6 +284,13 @@ void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
     // This is important for registers with undefined definitions.
     LIS.shrinkToUses(&LIS.getInterval(R));
   }
+}
+
+void repairLiveIntervals(ArrayRef<Register> RegistersToRepair, VirtRegMap &VRM,
+                         LiveRegMatrix &LRM, LiveIntervals &LIS) {
+  SmallSet<Register, 8> RegSet(RegistersToRepair.begin(),
+                               RegistersToRepair.end());
+  repairLiveIntervals(RegSet, VRM, LRM, LIS);
 }
 
 } // namespace llvm::AIESuperRegUtils

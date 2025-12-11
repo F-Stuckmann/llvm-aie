@@ -461,36 +461,6 @@ bool VirtRegRewriter::readsUndefSubreg(const MachineOperand &MO) const {
   SlotIndex BaseIndex = LIS->getInstructionIndex(MI);
   // This code is only meant to handle reading undefined subregisters which
   // we couldn't properly detect before.
-  if (!LI.liveAt(BaseIndex)) {
-    LIS->dump();
-    LLVM_DEBUG(dbgs() << "Reads of completely dead register (" << printReg(Reg)
-                      << ") should be marked undef already: " << MI);
-
-    dbgs() << "RegSlot : " << BaseIndex.getRegSlot() << "\nSlot : " << BaseIndex
-           << "\n";
-    const bool LiveRegSlot = LI.liveAt(BaseIndex.getRegSlot());
-    dbgs() << "Live at RegSlot: " << LiveRegSlot << '\n';
-    LLVM_DEBUG(if (LI.liveAt(BaseIndex.getRegSlot())) dbgs()
-               << "Live at RegSlot" << BaseIndex.getRegSlot() << '\n');
-  }
-  dbgs() << LI << "\n";
-  dbgs() << "BaseIndex: " << BaseIndex << '\n';
-  auto It = LI.find(BaseIndex);
-  dbgs() << "Find : " << It->start << '\n';
-  dbgs() << "Iterating through segments from find position:\n";
-  for (auto I = It; I != LI.end(); ++I) {
-    dbgs() << "  Segment: [" << I->start << ", " << I->end
-           << ") VN=" << I->valno->id << '\n';
-  }
-
-  It = LI.find(BaseIndex.getRegSlot());
-  dbgs() << "BaseIndex (RegSlot): " << BaseIndex.getRegSlot() << '\n';
-  dbgs() << "Find (RegSlot): " << It->start << '\n';
-  dbgs() << "Iterating through segments from find position:\n";
-  for (auto I = It; I != LI.end(); ++I) {
-    dbgs() << "  Segment: [" << I->start << ", " << I->end
-           << ") VN=" << I->valno->id << '\n';
-  }
   assert(LI.liveAt(BaseIndex) &&
          "Reads of completely dead register should be marked undef already");
   unsigned SubRegIdx = MO.getSubReg();

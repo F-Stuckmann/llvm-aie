@@ -22,6 +22,8 @@
 
 namespace llvm {
 
+class LiveRegMatrix;
+
 namespace SubregSpiller {
 struct VirtRegInfoAndOps {
   VirtRegInfo RI;
@@ -122,6 +124,10 @@ class SpillInfo {
   ///  with a LI update! Therefore, only update LIS once all regs have been
   ///  added.
   SmallVector<Register, 16> RegsForLISUpdate;
+
+  /// All instructions inserted during spill/reload insertion.
+  /// Includes COPYs and memory operations for use by foldSpillCopies().
+  SmallVector<MachineInstr *, 16> InsertedMIs;
 
   /// Insert a spill store instruction after the given instruction.
   /// Creates a COPY from the original register to a new virtual register,
@@ -229,6 +235,21 @@ public:
 
   void updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
                  const bool SkipNoInterval = false);
+
+  /// Fold COPYs in spill/reload sequences using register propagation.
+  /// Iterates over InsertedMIs and for each COPY, replaces all uses of the
+  /// destination with the source register (if register classes are compatible).
+  ///
+  /// This handles both spill and reload cases symmetrically:
+  /// - COPY -> Store: store's use of Dst becomes Src
+  /// - Load -> COPY: uses of Dst become Src (the loaded reg)
+  ///
+  /// \param MRI Machine register info
+  /// \param TII Target instruction info
+  /// \param TRI Target register info
+  /// \param LIS Live intervals
+  void foldSpillCopies(MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
+                       const TargetRegisterInfo &TRI, LiveIntervals &LIS);
 };
 
 /// AIESubRegSpiller - AIE-specific register spiller.
@@ -255,6 +276,9 @@ class AIESubRegSpiller : public InlineSpiller {
   /// Each SpillInfo tracks the spill/reload operations for one register.
   SmallVector<SpillInfo, 8> SpillInfos;
 
+  /// Live register matrix for tracking physical register interference.
+  LiveRegMatrix &LRM;
+
 public:
   /// Constructor - Initialize the AIE subreg spiller.
   ///
@@ -262,8 +286,10 @@ public:
   /// \param MF Machine function being processed
   /// \param VRM Virtual register map
   /// \param VRAI Virtual register auxiliary info for weight calculation
+  /// \param LRM Live register matrix
   AIESubRegSpiller(const Spiller::RequiredAnalyses &Analyses,
-                   MachineFunction &MF, VirtRegMap &VRM, VirtRegAuxInfo &VRAI);
+                   MachineFunction &MF, VirtRegMap &VRM, VirtRegAuxInfo &VRAI,
+                   LiveRegMatrix &LRM);
 
 protected:
   /// Perform the actual spilling of all collected registers.

@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AIESubRegSpiller.h"
+#include "AIESuperRegUtils.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
@@ -21,6 +22,7 @@
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveRangeEdit.h"
+#include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/LiveStacks.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -39,11 +41,12 @@ using namespace llvm;
 
 STATISTIC(NumSubRegSpills, "Number of subregister spills inserted");
 STATISTIC(NumSubRegReloads, "Number of subregister reloads inserted");
+STATISTIC(NumFoldedCopies, "Number of COPYs folded in spill/reload sequences");
 
 AIESubRegSpiller::AIESubRegSpiller(const Spiller::RequiredAnalyses &Analyses,
                                    MachineFunction &MF, VirtRegMap &VRM,
-                                   VirtRegAuxInfo &VRAI)
-    : InlineSpiller(Analyses, MF, VRM, VRAI) {
+                                   VirtRegAuxInfo &VRAI, LiveRegMatrix &LRM)
+    : InlineSpiller(Analyses, MF, VRM, VRAI), LRM(LRM) {
   // All common members initialized by InlineSpiller base constructor
   // SpillInfos will be default-initialized (empty vector)
   // Add AIE-specific initialization here if needed
@@ -109,10 +112,15 @@ void AIESubRegSpiller::spillAll() {
   SI.insertReloads(MRI, TII, TRI, VRM, LIS);
   SI.insertSpills(MRI, TII, TRI, VRM, LIS);
 
+  // Fold COPY chains in spill/reload sequences to reduce register pressure.
+  // This must run before updateLIS to avoid issues with deleted instructions.
+  SI.foldSpillCopies(MRI, TII, TRI, LIS);
+
   // Update LIS for all newly created registers. This is deferred until after
   // all spills/reloads are inserted so intervals are computed correctly
   // (especially for tied operands where reload and spill share the same reg).
-  SI.updateLIS(SI.getRegsForLISUpdate(), LIS);
+  AIESuperRegUtils::repairLiveIntervals(SI.getRegsForLISUpdate(), VRM, LRM,
+                                        LIS);
 
   SpillInfos.push_back(SI);
   LLVM_DEBUG(
@@ -218,12 +226,21 @@ void SpillInfo::update(const Register Reg, MachineRegisterInfo &MRI) {
     const auto [RegInfo, Ops] = getVirtRegInfoAndOps(MI, Reg);
     SpillMIAndReg Entry = {&MI, Reg};
 
-    if (llvm::is_contained(SpillLocations, Entry))
+    if (llvm::is_contained(SpillLocations, Entry) ||
+        llvm::is_contained(ReloadLocations, Entry))
       // Tied VRegs are encountered multiple times, we only have to add them
       // once.
       continue;
 
-    if (RegInfo.Writes) {
+    auto HasDeadDef = [](const auto &Ops) {
+      return llvm::any_of(
+          Ops, [](const std::pair<MachineInstr *, unsigned> &Op) {
+            const MachineOperand &MO = Op.first->getOperand(Op.second);
+            return MO.isDef() && MO.isDead();
+          });
+    };
+
+    if (RegInfo.Writes && !HasDeadDef(Ops)) {
       LLVM_DEBUG(dbgs() << "Adding spill location: " << MI);
       SpillLocations.push_back(Entry);
     }
@@ -347,9 +364,16 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
       VRM.assignVirt2StackSlot(RegToStore, StackSlot);
 
     // Store the register to the stack slot
+    // Note: storeRegToStackSlot may insert additional COPYs for certain
+    // register classes (e.g., spill_eS_to_eR needs a COPY to eR first)
     TII.storeRegToStackSlot(MBB, SpillBefore, RegToStore, StoreIsKill,
                             StackSlot, RC, &TRI, Register());
   }
+
+  // Track all newly inserted instructions AND SpillInstr for COPY folding
+  // This includes COPYs created by storeRegToStackSlot internally
+  for (auto It = MI->getIterator(); It != MIS.end(); ++It)
+    InsertedMIs.push_back(&*It);
 
   // Register new instructions in LIS maps, but defer interval computation
   // until all spills/reloads are inserted (handled in spillAll).
@@ -401,6 +425,8 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     VRM.assignVirt2StackSlot(RegToLoad, StackSlot);
 
     // Load from stack slot
+    // Note: loadRegFromStackSlot may insert additional COPYs for certain
+    // register classes
     TII.loadRegFromStackSlot(MBB, MI, RegToLoad, StackSlot, RC, &TRI,
                              Register());
 
@@ -415,6 +441,11 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   }
   // Replace Old Register with reloaded Copy Register (NewVReg)
   SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
+
+  // Track all newly inserted instructions AND ReloadMI for COPY folding
+  // This includes COPYs created by loadRegFromStackSlot internally
+  for (auto It = MIS.begin(); It != std::next(MI->getIterator()); ++It)
+    InsertedMIs.push_back(&*It);
 
   // Record the rename so insertSpill can find it for tied operands
   Renames.recordRename(MI, ToBeReplacedReg, NewVReg);
@@ -502,5 +533,199 @@ void SpillInfo::dump() const {
   dbgs() << "  ReloadLocations (" << ReloadLocations.size() << "):\n";
   for (const auto &[MI, _] : ReloadLocations) {
     dbgs() << "    " << *MI;
+  }
+}
+
+void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
+                                const TargetInstrInfo &TII,
+                                const TargetRegisterInfo &TRI,
+                                LiveIntervals &LIS) {
+  LLVM_DEBUG(dbgs() << "[SubRegSpiller] Folding COPYs in spill/reload "
+                       "sequences (symmetric)\n");
+
+  if (InsertedMIs.empty())
+    return;
+
+  SmallPtrSet<MachineInstr *, 8> InstsToDelete;
+  SmallVector<Register, 8> RegsToRemove;
+  SmallVector<Register, 8> SrcRegsExtended;
+  // Physical registers and their new use indices for live interval extension
+  SmallVector<std::pair<MCPhysReg, SmallVector<SlotIndex, 4>>, 4>
+      PhysRegExtensions;
+
+  // Helper to check if Src can replace Dst in all uses
+  auto CanReplaceInAllUses = [&](Register Dst, Register Src) -> bool {
+    // Get the register class of Src
+    const TargetRegisterClass *SrcRC = Src.isVirtual()
+                                           ? MRI.getRegClass(Src)
+                                           : TRI.getMinimalPhysRegClass(Src);
+
+    for (MachineOperand &MO : MRI.use_operands(Dst)) {
+      MachineInstr *UserMI = MO.getParent();
+      unsigned OpIdx = UserMI->getOperandNo(&MO);
+
+      // Get the required register class for this operand
+      const TargetRegisterClass *ReqRC =
+          UserMI->getRegClassConstraint(OpIdx, &TII, &TRI);
+
+      if (ReqRC) {
+        // Check compatibility
+        if (Src.isVirtual()) {
+          if (!ReqRC->hasSubClassEq(SrcRC))
+            return false;
+        } else {
+          // Physical register - check if it's in the required class
+          if (!ReqRC->contains(Src))
+            return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  // Iterate until no more folding can be done (handles COPY chains)
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
+
+    // Process all inserted instructions - symmetric handling
+    for (MachineInstr *MI : InsertedMIs) {
+      // Skip if already marked for deletion
+      if (InstsToDelete.contains(MI))
+        continue;
+
+      // Check if this is a COPY
+      auto CopyInfo = TII.isCopyInstr(*MI);
+      if (!CopyInfo)
+        continue;
+
+      Register Src = CopyInfo->Source->getReg();
+      Register Dst = CopyInfo->Destination->getReg();
+
+      // We can only fold if Dst is virtual (we'll replace its uses)
+      if (!Dst.isVirtual())
+        continue;
+
+      // Skip COPYs with subreg destination - these are partial definitions
+      // that define only part of the destination register. Folding them would
+      // incorrectly propagate the source register to uses that expect the full
+      // destination register, potentially across blocks where the source isn't
+      // defined.
+      if (CopyInfo->Destination->getSubReg())
+        continue;
+
+      // Only fold if all uses of Dst are in the same basic block as the COPY.
+      // Folding across blocks can break dominance relationships, especially
+      // with loops where a use in the next iteration would reference a
+      // register defined later in the current iteration.
+      const MachineBasicBlock *CopyMBB = MI->getParent();
+      bool AllUsesLocal = llvm::all_of(MRI.use_operands(Dst),
+                                       [CopyMBB](const MachineOperand &MO) {
+                                         return MO.getParent()->getParent() == CopyMBB;
+                                       });
+      if (!AllUsesLocal)
+        continue;
+
+      // For virtual Src registers, verify that Src's definition dominates all
+      // uses of Dst. If Src is defined in the same block as the uses, the def
+      // must come before all uses in program order. Use SlotIndexes to compare.
+      if (Src.isVirtual()) {
+        // Use getUniqueVRegDef to handle registers with multiple definitions
+        // (e.g., loop-carried values). If there's no unique def, skip folding.
+        MachineInstr *SrcDef = MRI.getUniqueVRegDef(Src);
+        if (!SrcDef)
+          continue;
+
+        // Get slot index of Src's definition
+        SlotIndex SrcDefIdx = LIS.getInstructionIndex(*SrcDef);
+
+        // Check all uses of Dst - after replacement they become uses of Src
+        bool SrcDominatesAllUses = llvm::all_of(
+            MRI.use_operands(Dst), [&](const MachineOperand &MO) {
+              SlotIndex UseIdx = LIS.getInstructionIndex(*MO.getParent());
+              // Src's def must come before this use
+              return SrcDefIdx < UseIdx;
+            });
+
+        if (!SrcDominatesAllUses)
+          continue;
+      }
+
+      // Check if we can replace all uses of Dst with Src
+      if (!CanReplaceInAllUses(Dst, Src))
+        continue;
+
+      LLVM_DEBUG(dbgs() << "  Folding COPY: " << *MI << "    Replacing "
+                        << printReg(Dst, &TRI) << " with "
+                        << printReg(Src, &TRI) << "\n");
+
+      // Collect the instructions that will be modified (for physical reg LI
+      // update). Must be done before the replacement loop modifies the uses.
+      SmallVector<MachineInstr *, 4> ModifiedInsts;
+      for (MachineOperand &MO : MRI.use_operands(Dst))
+        ModifiedInsts.push_back(MO.getParent());
+
+      // Replace all uses of Dst with Src
+      for (MachineOperand &MO :
+           llvm::make_early_inc_range(MRI.use_operands(Dst))) {
+        MO.setReg(Src);
+        // Preserve kill flag from the COPY source if this is the last use
+        if (CopyInfo->Source->isKill() && MRI.use_empty(Src))
+          MO.setIsKill(true);
+      }
+
+      InstsToDelete.insert(MI);
+      RegsToRemove.push_back(Dst);
+
+      // Track source register that was extended with new uses.
+      // When folding `Dst = COPY Src` by replacing uses of Dst with Src:
+      // - Dst becomes dead (no uses, def deleted) -> remove its LiveInterval
+      // - Src gains NEW uses (inherited from Dst) -> must extend its
+      // LiveInterval
+      if (Src.isVirtual()) {
+        SrcRegsExtended.push_back(Src);
+      } else {
+        // For physical registers, collect the new use indices for later
+        // extension. Virtual registers are handled via repairLiveIntervals.
+        SmallVector<SlotIndex, 4> NewUseIndices;
+        for (MachineInstr *UserMI : ModifiedInsts) {
+          if (UserMI == MI)
+            continue; // Skip COPY itself (will be deleted)
+          NewUseIndices.push_back(
+              LIS.getInstructionIndex(*UserMI).getRegSlot());
+        }
+        PhysRegExtensions.emplace_back(Src.asMCReg(), std::move(NewUseIndices));
+      }
+      ++NumFoldedCopies;
+      Changed = true;
+    }
+  }
+
+  // Delete folded COPYs
+  for (MachineInstr *MI : InstsToDelete) {
+    LLVM_DEBUG(dbgs() << "  Deleting: " << *MI);
+    LIS.RemoveMachineInstrFromMaps(*MI);
+    MI->eraseFromParent();
+  }
+
+  // Extend physical register live intervals to cover the new uses
+  for (auto &[PhysReg, NewUseIndices] : PhysRegExtensions) {
+    for (MCRegUnit Unit : TRI.regunits(PhysReg)) {
+      LiveRange &LR = LIS.getRegUnit(Unit);
+      LIS.extendToIndices(LR, NewUseIndices);
+    }
+  }
+
+  // Update LIS for removed virtual registers
+  for (Register Reg : RegsToRemove) {
+    if (Reg.isVirtual() && LIS.hasInterval(Reg))
+      LIS.removeInterval(Reg);
+    llvm::erase(RegsForLISUpdate, Reg);
+  }
+
+  // Add source registers that were extended to the list for LIS update
+  for (Register Reg : SrcRegsExtended) {
+    if (!llvm::is_contained(RegsForLISUpdate, Reg))
+      RegsForLISUpdate.push_back(Reg);
   }
 }

@@ -22,20 +22,20 @@ define i32 @test(i32 inreg %a) local_unnamed_addr {
 ; CHECK-NEXT:    mov md0[#8], r1[0]
 ; CHECK-NEXT:    eq r0, r6, r12
 ; CHECK-NEXT:    mov0 r12, SS.md0[8]
-; CHECK-NEXT:    ite_nez r12, r6, r12, r0
 ; CHECK-NEXT:    mov md0[#10], r1[0]
-; CHECK-NEXT:    mov.u20 p0, #0
 ; CHECK-NEXT:    padda [sp], #32
+; CHECK-NEXT:    ite_nez r12, r6, r12, r0
+; CHECK-NEXT:    mov r13, md0
+; CHECK-NEXT:    st.spil r13, [sp, #-32] // 4-byte Folded Spill
 ; CHECK-NEXT:    PKTHD MS.md0[10], r12, #3, #0
-; CHECK-NEXT:    mov r12, md0
 ; CHECK-NEXT:    mov.s12 r0, #1
-; CHECK-NEXT:    mov m0, p0
-; CHECK-NEXT:    st.spil r12, [sp, #-32] // 4-byte Folded Spill
 ; CHECK-NEXT:    mov md0[#10], r0[0]
+; CHECK-NEXT:    mov.u20 p0, #0
+; CHECK-NEXT:    mov r12, md0
+; CHECK-NEXT:    mov m0, p0
+; CHECK-NEXT:    st.spil r12, [sp, #-28] // 4-byte Folded Spill
 ; CHECK-NEXT:    mov.u20 r12, #31
 ; CHECK-NEXT:    CPKTHD MS.md0[10], m0, #3, #0, r12, #0
-; CHECK-NEXT:    mov r12, md0
-; CHECK-NEXT:    st.spil r12, [sp, #-28] // 4-byte Folded Spill
 ; CHECK-NEXT:    lda.spil r12, [sp, #-32] // 4-byte Folded Reload
 ; CHECK-NEXT:    mov.u20 r0, #1
 ; CHECK-NEXT:    nop

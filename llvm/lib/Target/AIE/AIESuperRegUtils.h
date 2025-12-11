@@ -14,6 +14,7 @@
 #ifndef LLVM_LIB_TARGET_AIE_AIESUPERREGUTILS_H
 #define LLVM_LIB_TARGET_AIE_AIESUPERREGUTILS_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallSet.h"
 #include <optional>
 
@@ -76,6 +77,9 @@ bool isRegUsedBy2DOr3DInstruction(const MachineRegisterInfo &MRI,
 void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
                          VirtRegMap &VRM, LiveRegMatrix &LRM,
                          LiveIntervals &LIS);
+
+void repairLiveIntervals(ArrayRef<Register> RegistersToRepair, VirtRegMap &VRM,
+                         LiveRegMatrix &LRM, LiveIntervals &LIS);
 
 } // namespace llvm::AIESuperRegUtils
 

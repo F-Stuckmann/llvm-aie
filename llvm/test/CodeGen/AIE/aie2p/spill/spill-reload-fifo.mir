@@ -48,7 +48,7 @@ body:             |
     ; CHECK-LABEL: name: test_1024_fifo_caller_saved
     ; CHECK: liveins: $lf0
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: VST_FIFO_SPILL killed renamable $lf0, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
+    ; CHECK-NEXT: VST_FIFO_SPILL killed $lf0, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $lf0 = VLDA_FIFO_SPILL %stack.0, implicit $sp :: (load (s1024) from %stack.0, align 64)
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $lf0
@@ -100,7 +100,7 @@ body:             |
     ; CHECK-LABEL: name: test_1024_fifo_sf_caller_saved
     ; CHECK: liveins: $sf
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: VST_FIFO_SPILL killed renamable $sf, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
+    ; CHECK-NEXT: VST_FIFO_SPILL killed $sf, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $sf = VLDA_FIFO_SPILL %stack.0, implicit $sp :: (load (s1024) from %stack.0, align 64)
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $sf
@@ -124,8 +124,7 @@ body:             |
     ; CHECK-LABEL: name: test_512_fifo_caller_saved
     ; CHECK: liveins: $lf0
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: renamable $lfh0 = COPY $lfl0
-    ; CHECK-NEXT: VST_dmx_sts_fifohl_spill killed renamable $lfh0, %stack.0, implicit $sp :: (store (s512) into %stack.0)
+    ; CHECK-NEXT: VST_dmx_sts_fifohl_spill killed $lfl0, %stack.0, implicit $sp :: (store (s512) into %stack.0)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $lfh0 = VLDA_dmx_lda_fifohl_spill %stack.0, implicit $sp :: (load (s512) from %stack.0)
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $lfh0
@@ -176,7 +175,7 @@ body:             |
     ; CHECK-LABEL: name: test_plfr_fifo_caller_saved
     ; CHECK: liveins: $plfr0
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: VST_PLFR_SPILL killed renamable $plfr0, %stack.0, implicit $sp :: (store (s1088) into %stack.0, align 64)
+    ; CHECK-NEXT: VST_PLFR_SPILL killed $plfr0, %stack.0, implicit $sp :: (store (s1088) into %stack.0, align 64)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $plfr0 = VLDA_PLFR_SPILL %stack.0, implicit $sp :: (load (s1088) from %stack.0, align 64)
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $plfr0

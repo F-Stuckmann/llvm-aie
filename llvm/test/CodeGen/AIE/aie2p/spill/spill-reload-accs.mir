@@ -52,7 +52,7 @@ body:             |
     ; CHECK-LABEL: name: test_512_caller_saved
     ; CHECK: liveins: $bmll0
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: VST_dmx_sts_bm_spill killed renamable $bmll0, %stack.0, implicit $sp :: (store (s512) into %stack.0)
+    ; CHECK-NEXT: VST_dmx_sts_bm_spill killed $bmll0, %stack.0, implicit $sp :: (store (s512) into %stack.0)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $bmll0 = VLDA_dmx_lda_bm_spill %stack.0, implicit $sp :: (load (s512) from %stack.0)
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $bmll0
@@ -106,7 +106,7 @@ body:             |
     ; CHECK-LABEL: name: test_1024_caller_saved
     ; CHECK: liveins: $cml0
     ; CHECK-NEXT: {{  $}}
-    ; CHECK-NEXT: VST_CM_SPILL killed renamable $cml0, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
+    ; CHECK-NEXT: VST_CM_SPILL killed $cml0, %stack.0, implicit $sp :: (store (s1024) into %stack.0, align 64)
     ; CHECK-NEXT: PseudoJL 32, csr_aie2p, implicit-def $lr
     ; CHECK-NEXT: renamable $cml0 = VLDA_CM_SPILL %stack.0, implicit $sp :: (load (s1024) from %stack.0, align 64)
     ; CHECK-NEXT: PseudoRET implicit $lr, implicit killed renamable $cml0
