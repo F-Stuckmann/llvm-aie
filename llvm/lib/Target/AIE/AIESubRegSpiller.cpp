@@ -442,10 +442,11 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   // Replace Old Register with reloaded Copy Register (NewVReg)
   SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
 
-  // Track all newly inserted instructions AND ReloadMI for COPY folding
+  // Track all newly inserted instructions for COPY folding
   // This includes COPYs created by loadRegFromStackSlot internally
-  for (auto It = MIS.begin(); It != std::next(MI->getIterator()); ++It)
+  for (auto It = MIS.begin(); It != MI->getIterator(); ++It)
     InsertedMIs.push_back(&*It);
+  InsertedMIs.push_back(MI);
 
   // Record the rename so insertSpill can find it for tied operands
   Renames.recordRename(MI, ToBeReplacedReg, NewVReg);
