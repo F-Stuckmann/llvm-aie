@@ -620,10 +620,10 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
       // with loops where a use in the next iteration would reference a
       // register defined later in the current iteration.
       const MachineBasicBlock *CopyMBB = MI->getParent();
-      bool AllUsesLocal = llvm::all_of(MRI.use_operands(Dst),
-                                       [CopyMBB](const MachineOperand &MO) {
-                                         return MO.getParent()->getParent() == CopyMBB;
-                                       });
+      bool AllUsesLocal = llvm::all_of(
+          MRI.use_operands(Dst), [CopyMBB](const MachineOperand &MO) {
+            return MO.getParent()->getParent() == CopyMBB;
+          });
       if (!AllUsesLocal)
         continue;
 
@@ -641,8 +641,8 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
         SlotIndex SrcDefIdx = LIS.getInstructionIndex(*SrcDef);
 
         // Check all uses of Dst - after replacement they become uses of Src
-        bool SrcDominatesAllUses = llvm::all_of(
-            MRI.use_operands(Dst), [&](const MachineOperand &MO) {
+        bool SrcDominatesAllUses =
+            llvm::all_of(MRI.use_operands(Dst), [&](const MachineOperand &MO) {
               SlotIndex UseIdx = LIS.getInstructionIndex(*MO.getParent());
               // Src's def must come before this use
               return SrcDefIdx < UseIdx;
@@ -665,6 +665,12 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
       SmallVector<MachineInstr *, 4> ModifiedInsts;
       for (MachineOperand &MO : MRI.use_operands(Dst))
         ModifiedInsts.push_back(MO.getParent());
+
+      // Do not fold copies to reserved physical registers.
+      const bool IsReservedPhysReg =
+          Src.isPhysical() && MRI.isReserved(Src.asMCReg());
+      if (IsReservedPhysReg)
+        continue;
 
       // Replace all uses of Dst with Src
       for (MachineOperand &MO :
