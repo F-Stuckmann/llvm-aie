@@ -337,9 +337,39 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
     SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
   }
 
+  // Compute which lanes are alive at the def slot. We only want to spill
+  // subregs that are actually defined at this instruction. SubRegSpillInfos
+  // contains all subregs defined across ALL instructions, but at this specific
+  // spill location only a subset may be defined.
+  LaneBitmask LiveLanesAtDef = LaneBitmask::getNone();
+  if (LIS.hasInterval(ToSpill)) {
+    const LiveInterval &LI = LIS.getInterval(ToSpill);
+    const SlotIndex DefIdx = LIS.getInstructionIndex(*MI).getRegSlot();
+    if (LI.hasSubRanges()) {
+      for (const LiveInterval::SubRange &SR : LI.subranges()) {
+        if (SR.liveAt(DefIdx))
+          LiveLanesAtDef |= SR.LaneMask;
+      }
+    } else if (LI.liveAt(DefIdx)) {
+      LiveLanesAtDef = LaneBitmask::getAll();
+    }
+  }
+
   for (auto &Info : SubRegSpillInfos) {
-    int StackSlot = Info.StackSlot;
     const bool IsSubReg = Info.SubRegIdx != 0;
+
+    // Skip subregs that are not alive at this spill point. This can happen
+    // when different instructions define different subsets of subregs.
+    if (IsSubReg) {
+      const LaneBitmask SubRegLM = TRI.getSubRegIndexLaneMask(Info.SubRegIdx);
+      if ((LiveLanesAtDef & SubRegLM).none()) {
+        LLVM_DEBUG(dbgs() << "Skipping spill for dead subreg index "
+                          << Info.SubRegIdx << "\n");
+        continue;
+      }
+    }
+
+    int StackSlot = Info.StackSlot;
 
     // Find the operand that matches this SubRegIdx
     const TargetRegisterClass *RC =
@@ -421,13 +451,49 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   Register NewVReg = MRI.createVirtualRegister(OrigRC);
   RegsForLISUpdate.push_back(NewVReg);
 
+  // Compute which lanes are alive at the use slot. We only want to reload
+  // subregs that are actually used at this instruction. SubRegSpillInfos
+  // contains all subregs defined across ALL instructions, but at this specific
+  // reload location only a subset may be needed.
+  LaneBitmask LiveLanesAtUse = LaneBitmask::getNone();
+  if (LIS.hasInterval(ToBeReplacedReg)) {
+    const LiveInterval &LI = LIS.getInterval(ToBeReplacedReg);
+    const SlotIndex UseIdx = LIS.getInstructionIndex(*MI).getRegSlot(true);
+    if (LI.hasSubRanges()) {
+      for (const LiveInterval::SubRange &SR : LI.subranges()) {
+        if (SR.liveAt(UseIdx))
+          LiveLanesAtUse |= SR.LaneMask;
+      }
+    } else if (LI.liveAt(UseIdx)) {
+      LiveLanesAtUse = LaneBitmask::getAll();
+    }
+  }
+
+  bool FirstSubReg = true;
   for (unsigned I = 0; I < SubRegSpillInfos.size(); I++) {
     auto &Info = SubRegSpillInfos[I];
     unsigned SubRegIdx = Info.SubRegIdx;
     int StackSlot = Info.StackSlot;
 
     const bool IsSubReg = Info.SubRegIdx != 0;
-    unsigned AdditionalFlag = IsSubReg && I == 0 ? getUndefRegState(true) : 0;
+
+    // Skip subregs that are not alive at this reload point. This can happen
+    // when different instructions define/use different subsets of subregs.
+    if (IsSubReg) {
+      const LaneBitmask SubRegLM = TRI.getSubRegIndexLaneMask(SubRegIdx);
+      if ((LiveLanesAtUse & SubRegLM).none()) {
+        LLVM_DEBUG(dbgs() << "Skipping reload for dead subreg index "
+                          << SubRegIdx << "\n");
+        continue;
+      }
+    }
+
+    unsigned AdditionalFlag =
+        IsSubReg && FirstSubReg ? getUndefRegState(true) : 0;
+    // Set FirstSubReg to false for BOTH full reg reload and subreg reload.
+    // This ensures subsequent subreg COPYs don't incorrectly use undef flag
+    // after a full register has been loaded.
+    FirstSubReg = false;
 
     // Determine register class for the subreg
     const TargetRegisterClass *RC =
@@ -650,20 +716,6 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
       // defined.
       if (CopyInfo->Destination->getSubReg())
         continue;
-
-      // Do not fold copies to reserved physical registers.
-      auto IsReservedPhysReg = [&](Register Reg) -> bool {
-        return Reg.isPhysical() && MRI.isReserved(Reg.asMCReg());
-      };
-      // if (IsReservedPhysReg(Src) || IsReservedPhysReg(Dst)) {
-      //   LLVM_DEBUG(
-      //       dbgs() << "  Skipping COPY to/from reserved physical register: "
-      //              << *MI << "\n");
-      //   LLVM_DEBUG(dbgs() << "    Src: " << printReg(Src, &TRI) << "\n");
-      //   LLVM_DEBUG(dbgs() << "    Dst: " << printReg(Dst, &TRI) << "\n");
-
-      //   continue;
-      // }
 
       // Only fold if all uses of Dst are in the same basic block as the COPY.
       // Folding across blocks can break dominance relationships, especially
