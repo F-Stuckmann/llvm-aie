@@ -127,7 +127,7 @@ class SpillInfo {
 
   /// All instructions inserted during spill/reload insertion.
   /// Includes COPYs and memory operations for use by foldSpillCopies().
-  SmallVector<MachineInstr *, 16> InsertedMIs;
+  SmallVector<MachineInstr *, 16> ModifiedAndInsertedMIs;
 
   /// Insert a spill store instruction after the given instruction.
   /// Creates a COPY from the original register to a new virtual register,

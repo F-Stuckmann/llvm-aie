@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/Spiller.h"
 #include "llvm/CodeGen/StackMaps.h"
@@ -298,8 +299,20 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
                             const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                             LiveIntervals &LIS) {
   MachineBasicBlock &MBB = *MI->getParent();
-  MachineInstrSpan MIS(MI, &MBB);
-  MachineBasicBlock::iterator SpillBefore = std::next(MI->getIterator());
+
+  // Use getBundleEnd to safely get an iterator past the entire bundle.
+  // If MI is inside a bundle, std::next(MI->getIterator()) might point to
+  // another bundled instruction, which cannot be converted to a bundle
+  // iterator.
+  const MachineBasicBlock::instr_iterator BundleEndIt =
+      getBundleEnd(MI->getIterator());
+  const MachineBasicBlock::iterator SpillBefore(BundleEndIt);
+
+  // MachineInstrSpan must be created with a bundle iterator, not a bundled MI.
+  MachineInstrSpan MIS(SpillBefore, &MBB);
+  LLVM_DEBUG(dbgs() << "Inserting Spill for " << printReg(ToSpill) << " : "
+                    << *MI << "\n";
+             MI->getParent()->dump());
 
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
   Register NewVReg;
@@ -371,13 +384,19 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
   }
 
   // Track all newly inserted instructions AND SpillInstr for COPY folding
-  // This includes COPYs created by storeRegToStackSlot internally
-  for (auto It = MI->getIterator(); It != MIS.end(); ++It)
-    InsertedMIs.push_back(&*It);
+  // This includes COPYs created by storeRegToStackSlot internally.
+  // Start from bundle start to include all bundled instructions.
+  for (auto It = getBundleStart(MI->getIterator()); It != BundleEndIt; ++It) {
+    ModifiedAndInsertedMIs.push_back(&*It);
+  }
+  // MIS.begin() points to the first newly inserted instruction (if any).
+  for (auto It = MIS.begin(); It != SpillBefore; ++It)
+    ModifiedAndInsertedMIs.push_back(&*It);
 
   // Register new instructions in LIS maps, but defer interval computation
   // until all spills/reloads are inserted (handled in spillAll).
-  LIS.InsertMachineInstrRangeInMaps(std::next(MI->getIterator()), MIS.end());
+  // MIS.begin() points to the first newly inserted instruction.
+  LIS.InsertMachineInstrRangeInMaps(MIS.begin(), SpillBefore);
 }
 
 void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
@@ -390,7 +409,12 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
       getVirtRegInfoAndOps(*MI, ToBeReplacedReg);
 
   MachineBasicBlock &MBB = *MI->getParent();
-  MachineInstrSpan MIS(MI, &MBB);
+
+  // Use getBundleStart to safely get an iterator to the bundle head.
+  // If MI is inside a bundle, we must insert before the entire bundle.
+  const MachineBasicBlock::iterator InsertBefore(
+      getBundleStart(MI->getIterator()));
+  MachineInstrSpan MIS(InsertBefore, &MBB);
 
   // Create a new virtual register for the parent register
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
@@ -427,13 +451,14 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     // Load from stack slot
     // Note: loadRegFromStackSlot may insert additional COPYs for certain
     // register classes
-    TII.loadRegFromStackSlot(MBB, MI, RegToLoad, StackSlot, RC, &TRI,
+    TII.loadRegFromStackSlot(MBB, InsertBefore, RegToLoad, StackSlot, RC, &TRI,
                              Register());
 
     if (IsSubReg) {
       // Copy from the temporary to the parent register's subregister
       auto CopyMIBuilder =
-          BuildMI(MBB, MI, MI->getDebugLoc(), TII.get(TargetOpcode::COPY))
+          BuildMI(MBB, InsertBefore, MI->getDebugLoc(),
+                  TII.get(TargetOpcode::COPY))
               .addReg(NewVReg, RegState::Define | AdditionalFlag, SubRegIdx)
               .addReg(RegToLoad, RegState::Kill);
       LLVM_DEBUG(dbgs() << "Inserted: " << *CopyMIBuilder.getInstr());
@@ -444,16 +469,20 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
 
   // Track all newly inserted instructions for COPY folding
   // This includes COPYs created by loadRegFromStackSlot internally
-  for (auto It = MIS.begin(); It != MI->getIterator(); ++It)
-    InsertedMIs.push_back(&*It);
-  InsertedMIs.push_back(MI);
+  for (auto It = MIS.begin(); It != InsertBefore.getInstrIterator(); ++It)
+    ModifiedAndInsertedMIs.push_back(&*It);
+  // Add all instructions in the bundle (InsertBefore is already bundle start)
+  for (auto It = InsertBefore.getInstrIterator();
+       It != getBundleEnd(MI->getIterator()); ++It)
+    ModifiedAndInsertedMIs.push_back(&*It);
 
   // Record the rename so insertSpill can find it for tied operands
   Renames.recordRename(MI, ToBeReplacedReg, NewVReg);
 
   // Register new instructions in LIS maps, but defer interval computation
   // until all spills/reloads are inserted (handled in spillAll).
-  LIS.InsertMachineInstrRangeInMaps(MIS.begin(), MI->getIterator());
+  LIS.InsertMachineInstrRangeInMaps(MIS.begin(),
+                                    InsertBefore.getInstrIterator());
 }
 
 void SpillInfo::insertSpills(MachineRegisterInfo &MRI,
@@ -544,7 +573,7 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] Folding COPYs in spill/reload "
                        "sequences (symmetric)\n");
 
-  if (InsertedMIs.empty())
+  if (ModifiedAndInsertedMIs.empty())
     return;
 
   SmallPtrSet<MachineInstr *, 8> InstsToDelete;
@@ -590,7 +619,7 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
     Changed = false;
 
     // Process all inserted instructions - symmetric handling
-    for (MachineInstr *MI : InsertedMIs) {
+    for (MachineInstr *MI : ModifiedAndInsertedMIs) {
       // Skip if already marked for deletion
       if (InstsToDelete.contains(MI))
         continue;
@@ -621,6 +650,20 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
       // defined.
       if (CopyInfo->Destination->getSubReg())
         continue;
+
+      // Do not fold copies to reserved physical registers.
+      auto IsReservedPhysReg = [&](Register Reg) -> bool {
+        return Reg.isPhysical() && MRI.isReserved(Reg.asMCReg());
+      };
+      // if (IsReservedPhysReg(Src) || IsReservedPhysReg(Dst)) {
+      //   LLVM_DEBUG(
+      //       dbgs() << "  Skipping COPY to/from reserved physical register: "
+      //              << *MI << "\n");
+      //   LLVM_DEBUG(dbgs() << "    Src: " << printReg(Src, &TRI) << "\n");
+      //   LLVM_DEBUG(dbgs() << "    Dst: " << printReg(Dst, &TRI) << "\n");
+
+      //   continue;
+      // }
 
       // Only fold if all uses of Dst are in the same basic block as the COPY.
       // Folding across blocks can break dominance relationships, especially
@@ -672,12 +715,6 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
       SmallVector<MachineInstr *, 4> ModifiedInsts;
       for (MachineOperand &MO : MRI.use_operands(Dst))
         ModifiedInsts.push_back(MO.getParent());
-
-      // Do not fold copies to reserved physical registers.
-      const bool IsReservedPhysReg =
-          Src.isPhysical() && MRI.isReserved(Src.asMCReg());
-      if (IsReservedPhysReg)
-        continue;
 
       // Replace all uses of Dst with Src
       for (MachineOperand &MO :
