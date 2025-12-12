@@ -607,6 +607,13 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
       if (!Dst.isVirtual())
         continue;
 
+      // We can only fold if Dst has exactly one definition (the COPY itself).
+      // If there are other defs (e.g., partial subreg defs), those would be
+      // left referencing a register with no live interval after we delete
+      // the COPY.
+      if (!MRI.hasOneDef(Dst))
+        continue;
+
       // Skip COPYs with subreg destination - these are partial definitions
       // that define only part of the destination register. Folding them would
       // incorrectly propagate the source register to uses that expect the full

@@ -27,23 +27,31 @@ body:             |
     ; RA-STAGED-NEXT: renamable $dn0 = LDA_dms_lda_idx_imm renamable $p1, 0
     ; RA-STAGED-NEXT: renamable $m0 = LDA_dms_lda_idx_imm renamable $p1, 4
     ; RA-STAGED-NEXT: renamable $dj0 = LDA_dms_lda_idx_imm renamable $p1, 8
-    ; RA-STAGED-NEXT: ST_D_SPILL renamable $d0, %stack.0, implicit $sp :: (store (s128) into %stack.0, align 4)
+    ; RA-STAGED-NEXT: ST_D_SPILL killed renamable $d0, %stack.4, implicit $sp :: (store (s128) into %stack.4, align 4)
     ; RA-STAGED-NEXT: renamable $dj0 = MOV_PD_imm11_pseudo 12
     ; RA-STAGED-NEXT: renamable $r0 = LDA_dms_lda_idx renamable $p1, killed renamable $dj0
-    ; RA-STAGED-NEXT: renamable $d0 = LDA_D_SPILL %stack.0, implicit $sp :: (load (s128) from %stack.0, align 4)
+    ; RA-STAGED-NEXT: renamable $d0 = LDA_D_SPILL %stack.4, implicit $sp :: (load (s128) from %stack.4, align 4)
     ; RA-STAGED-NEXT: renamable $dc0 = COPY killed renamable $r0
     ; RA-STAGED-NEXT: ST_D_SPILL killed renamable $d0, %stack.0, implicit $sp :: (store (s128) into %stack.0, align 4)
     ; RA-STAGED-NEXT: renamable $dn0 = LDA_dms_lda_idx_imm renamable $p1, 16
     ; RA-STAGED-NEXT: renamable $m0 = LDA_dms_lda_idx_imm renamable $p1, 20
     ; RA-STAGED-NEXT: renamable $dj0 = LDA_dms_lda_idx_imm renamable $p1, 24
     ; RA-STAGED-NEXT: renamable $dc0 = LDA_dms_lda_idx_imm killed renamable $p1, 28
-    ; RA-STAGED-NEXT: ST_D_SPILL killed renamable $d0, %stack.1, implicit $sp :: (store (s128) into %stack.1, align 4)
+    ; RA-STAGED-NEXT: ST_D_SPILL renamable $d0, %stack.1, implicit $sp :: (store (s128) into %stack.1, align 4)
+    ; RA-STAGED-NEXT: ST_R_SPILL killed renamable $dc0, %stack.2, implicit $sp :: (store (s32) into %stack.2)
     ; RA-STAGED-NEXT: renamable $d0 = LDA_D_SPILL %stack.0, implicit $sp :: (load (s128) from %stack.0, align 4)
     ; RA-STAGED-NEXT: $p0, $dc0 = PADDA_2D_split killed $p0, $m0, $dn0, $dj0, $dc0
-    ; RA-STAGED-NEXT: ST_D_SPILL killed renamable $d0, %stack.0, implicit $sp :: (store (s128) into %stack.0, align 4)
+    ; RA-STAGED-NEXT: ST_R_SPILL killed renamable $dc0, %stack.3, implicit $sp :: (store (s32) into %stack.3)
     ; RA-STAGED-NEXT: renamable $d0 = LDA_D_SPILL %stack.1, implicit $sp :: (load (s128) from %stack.1, align 4)
+    ; RA-STAGED-NEXT: renamable $dc0 = LDA_R_SPILL %stack.2, implicit $sp :: (load (s32) from %stack.2)
+    ; RA-STAGED-NEXT: ST_D_SPILL renamable $d0, %stack.1, implicit $sp :: (store (s128) into %stack.1, align 4)
+    ; RA-STAGED-NEXT: ST_R_SPILL killed renamable $dc0, %stack.2, implicit $sp :: (store (s32) into %stack.2)
+    ; RA-STAGED-NEXT: renamable $d0 = LDA_D_SPILL %stack.1, implicit $sp :: (load (s128) from %stack.1, align 4)
+    ; RA-STAGED-NEXT: renamable $dc0 = LDA_R_SPILL %stack.2, implicit $sp :: (load (s32) from %stack.2)
     ; RA-STAGED-NEXT: $p0, dead $dc0 = PADDA_2D_split killed $p0, $m0, $dn0, $dj0, $dc0
-    ; RA-STAGED-NEXT: renamable $d0 = LDA_D_SPILL %stack.0, implicit $sp :: (load (s128) from %stack.0, align 4)
+    ; RA-STAGED-NEXT: renamable $dc0 = LDA_R_SPILL %stack.3, implicit $sp :: (load (s32) from %stack.3)
+    ; RA-STAGED-NEXT: ST_R_SPILL killed renamable $dc0, %stack.3, implicit $sp :: (store (s32) into %stack.3)
+    ; RA-STAGED-NEXT: renamable $dc0 = LDA_R_SPILL %stack.3, implicit $sp :: (load (s32) from %stack.3)
     ; RA-STAGED-NEXT: PseudoRET implicit $lr, implicit killed renamable $p0, implicit killed renamable $dc0, implicit $d1, implicit $d2, implicit $d3, implicit $d4, implicit $d5, implicit $d6, implicit $d7
     ;
     ; RA-STAGED-FG-LABEL: name: test_spill_2d_last_stage
