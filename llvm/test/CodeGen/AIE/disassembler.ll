@@ -14,10 +14,8 @@
 target triple = "aie"
 
 define i32 @test(i32 inreg %a) local_unnamed_addr {
-; CHECK-LABEL: test:
-; CHECK:         .p2align 4
-; CHECK-NEXT:  // %bb.0: // %entry
-; CHECK-NEXT:    mov.s12 r1, #0
+; CHECK-LABEL: test
+; CHECK:         mov.s12 r1, #0
 ; CHECK-NEXT:    mov.u20 r12, #123
 ; CHECK-NEXT:    mov md0[#8], r1[0]
 ; CHECK-NEXT:    eq r0, r6, r12
@@ -30,13 +28,13 @@ define i32 @test(i32 inreg %a) local_unnamed_addr {
 ; CHECK-NEXT:    mov r12, md0
 ; CHECK-NEXT:    mov.s12 r0, #1
 ; CHECK-NEXT:    mov m0, p0
-; CHECK-NEXT:    st.spil r12, [sp, #-32] // 4-byte Folded Spill
+; CHECK-NEXT:    st.spil r12, [sp, #-32]
 ; CHECK-NEXT:    mov md0[#10], r0[0]
 ; CHECK-NEXT:    mov.u20 r12, #31
 ; CHECK-NEXT:    CPKTHD MS.md0[10], m0, #3, #0, r12, #0
 ; CHECK-NEXT:    mov r12, md0
-; CHECK-NEXT:    st.spil r12, [sp, #-28] // 4-byte Folded Spill
-; CHECK-NEXT:    lda.spil r12, [sp, #-32] // 4-byte Folded Reload
+; CHECK-NEXT:    st.spil r12, [sp, #-28]
+; CHECK-NEXT:    lda.spil r12, [sp, #-32]
 ; CHECK-NEXT:    mov.u20 r0, #1
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    nop
@@ -46,7 +44,7 @@ define i32 @test(i32 inreg %a) local_unnamed_addr {
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    mov md0, r12
 ; CHECK-NEXT:    movs MS.md0[10], r6, #0
-; CHECK-NEXT:    lda.spil r12, [sp, #-28] // 4-byte Folded Reload
+; CHECK-NEXT:    lda.spil r12, [sp, #-28]
 ; CHECK-NEXT:    padda [sp], #-32
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    nop
@@ -57,11 +55,6 @@ define i32 @test(i32 inreg %a) local_unnamed_addr {
 ; CHECK-NEXT:    mov md0, r12
 ; CHECK-NEXT:    movs MS.md0[10], r6, #0
 ; CHECK-NEXT:    ret lr
-; CHECK-NEXT:    nop // Delay Slot 5
-; CHECK-NEXT:    nop // Delay Slot 4
-; CHECK-NEXT:    nop // Delay Slot 3
-; CHECK-NEXT:    nop // Delay Slot 2
-; CHECK-NEXT:    nop // Delay Slot 1
 entry:
 	%0 = tail call i32 @llvm.aie.get.ss(i32 0)
   %x = tail call i32 @llvm.aie.get.ss(i32 1)

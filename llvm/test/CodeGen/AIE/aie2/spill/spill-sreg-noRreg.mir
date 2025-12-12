@@ -5,7 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # (c) Copyright 2023-2025 Advanced Micro Devices, Inc. or its affiliates
-# RUN: not --crash llc -mtriple=aie2 --verify-machineinstrs --aie-reserved-gprs=32 -run-pass=greedy -run-pass=virtregrewriter %s -o - 2>&1 | FileCheck %s
+
+# Test with InlineSpiller (original behavior)
+# RUN: not --crash llc -mtriple=aie2 --verify-machineinstrs --aie-reserved-gprs=32 --aie-use-inline-spiller -run-pass=greedy -run-pass=virtregrewriter %s -o - 2>&1 | FileCheck %s --check-prefix=INLINE
+
+# Test with AIESubRegSpiller (new behavior)
+# RUN: not --crash llc -mtriple=aie2 --verify-machineinstrs --aie-reserved-gprs=32 -run-pass=greedy -run-pass=virtregrewriter %s -o - 2>&1 | FileCheck %s --check-prefix=SUBREG
 
 # Only $s0 is available to allocate %0, but the former is used by VUPS.
 # It then needs to be spilled and reloaded to/from memory. But this will fail if
@@ -22,4 +27,5 @@ body:             |
     PseudoRET implicit $lr, implicit %20, implicit %0, implicit $s1, implicit $s2, implicit $s3
 ...
 
-# CHECK: error: <unknown>:0:0: ran out of registers during register allocation
+# INLINE: error: {{.*}}ran out of registers during register allocation
+# SUBREG: error: {{.*}}no registers from class available to allocate
