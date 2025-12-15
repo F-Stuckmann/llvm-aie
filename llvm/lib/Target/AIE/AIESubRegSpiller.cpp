@@ -310,9 +310,6 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
 
   // MachineInstrSpan must be created with a bundle iterator, not a bundled MI.
   MachineInstrSpan MIS(SpillBefore, &MBB);
-  LLVM_DEBUG(dbgs() << "Inserting Spill for " << printReg(ToSpill) << " : "
-                    << *MI << "\n";
-             MI->getParent()->dump());
 
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
   Register NewVReg;
@@ -560,6 +557,7 @@ void SpillInfo::insertSpills(MachineRegisterInfo &MRI,
     LLVM_DEBUG(dbgs() << "Inserting Spill for " << printReg(Reg) << " : " << *MI
                       << "\n";);
     insertSpill(MI, Reg, IsKill, MRI, TII, TRI, VRM, LIS);
+    LLVM_DEBUG(dbgs() << "After insertSpill:\n"; MI->getParent()->dump());
   }
 }
 
