@@ -226,15 +226,18 @@ void SpillInfo::calcStack(MachineRegisterInfo &MRI,
     if (Info.SubRegIdx)
       RC = TRI.getSubRegisterClass(RC, Info.SubRegIdx);
 
-    LLVM_DEBUG(dbgs() << "Creating spill slot for " << printReg(OrigReg)
-                      << "\n");
     Info.StackSlot = VRM.createSpillSlot(RC);
 
     // Create the stack interval for StackSlotColoring. The value number is
     // added later by mergeStackIntervals() only if there are segments to merge.
     Info.StackInt = &LSS.getOrCreateInterval(Info.StackSlot, RC);
 
-    LLVM_DEBUG(dbgs() << "Created spill slot: " << Info.StackSlot << "\n");
+    LLVM_DEBUG(dbgs() << "Creating spill slot for " << printReg(OrigReg)
+                      << " subreg " << Info.SubRegIdx << " Spill Slot: ";
+               MachineOperand::printStackObjectReference(dbgs(), Info.StackSlot,
+                                                         /*IsFixed=*/false,
+                                                         /*Name=*/"");
+               dbgs() << "\n");
   }
 
   // Mark OrigReg as spilled by assigning it to a stack slot.
