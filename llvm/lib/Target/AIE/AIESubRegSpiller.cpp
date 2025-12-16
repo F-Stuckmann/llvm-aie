@@ -744,11 +744,23 @@ void SpillInfo::mergeStackIntervals(LiveIntervals &LIS, LiveStacks &LSS) {
     VNInfo *VNI =
         Info.StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
 
-    // Stack slot is live from earliest spill to latest reload.
-    // This is the precise liveness range based on actual store/load positions.
+    // Stack slot is live from earliest access to latest access.
+    // This covers spill-reload-spill patterns (e.g., in loops) where a spill
+    // may occur after the last reload. Example:
+    //   1. Spill at slot 1252 (first store)
+    //   2. Reload at slot 2468 (load)
+    //   3. Spill at slot 2632 (second store - AFTER the reload!)
+    // Without including spill indices in End, the range would be [1252, 2468)
+    // which misses the second spill at 2632, causing "stores to dead spill
+    // slot" errors.
+    // Use getDeadSlot() because live intervals are half-open [Start, End) and
+    // we need the interval to INCLUDE the last access point.
     // FIXME: Can we use multiple intervals and not the worst case range?
     SlotIndex Start = *llvm::min_element(Info.SpillSlotIndices);
-    SlotIndex End = *llvm::max_element(Info.ReloadSlotIndices);
+    const SlotIndex MaxReload = *llvm::max_element(Info.ReloadSlotIndices);
+    const SlotIndex MaxSpill = *llvm::max_element(Info.SpillSlotIndices);
+    const SlotIndex MaxAccess = std::max(MaxReload, MaxSpill);
+    SlotIndex End = MaxAccess.getDeadSlot();
 
     // Ensure valid range (Start < End). If the last reload happens before
     // the first spill (unusual but possible with tied operands), skip.
