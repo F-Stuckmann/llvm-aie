@@ -115,6 +115,12 @@ void AIESubRegSpiller::spillAll() {
 
   SI.calcStack(MRI, TRI, VRM, LSS);
 
+  // Merge the spilled registers' live ranges into the stack intervals.
+  // This must happen BEFORE updateLIS while the original
+  // register intervals are still valid. Enables StackSlotColoring to coalesce
+  // non-overlapping stack slots.
+  SI.mergeStackIntervals(RegsToSpill, TRI, LIS, LSS);
+
   // todo: FIXME: perform optimizations
 
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] SpillInfo: "; SI.dump());
@@ -222,6 +228,11 @@ void SpillInfo::calcStack(MachineRegisterInfo &MRI,
     LLVM_DEBUG(dbgs() << "Creating spill slot for " << printReg(OrigReg)
                       << "\n");
     Info.StackSlot = VRM.createSpillSlot(RC);
+
+    // Create the stack interval for StackSlotColoring. The value number is
+    // added later by mergeStackIntervals() only if there are segments to merge.
+    Info.StackInt = &LSS.getOrCreateInterval(Info.StackSlot, RC);
+
     LLVM_DEBUG(dbgs() << "Created spill slot: " << Info.StackSlot << "\n");
   }
 
@@ -429,6 +440,8 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
       NumSubRegSpills++;
     } else {
       RegToStore = NewVReg;
+      // Track NewVReg for stack interval merging
+      Info.SpillVRegs.push_back(NewVReg);
       // todo: remove this codepath, use regular inlinespiller
       NumSpills++;
     }
@@ -670,6 +683,52 @@ void SpillInfo::dump() const {
   dbgs() << "  ReloadLocations (" << ReloadLocations.size() << "):\n";
   for (const auto &[MI, _] : ReloadLocations) {
     dbgs() << "    " << *MI;
+  }
+}
+
+void SpillInfo::mergeStackIntervals(ArrayRef<Register> RegsToSpill,
+                                    const TargetRegisterInfo &TRI,
+                                    LiveIntervals &LIS, LiveStacks &LSS) {
+  LLVM_DEBUG(dbgs() << "[mergeStackIntervals] Processing "
+                    << SubRegSpillInfos.size() << " SubRegSpillInfos with "
+                    << RegsToSpill.size() << " RegsToSpill\n");
+
+  for (auto &Info : SubRegSpillInfos) {
+    if (!Info.StackInt)
+      continue;
+
+    // Create the value number for this stack interval.
+    VNInfo *VNI =
+        Info.StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
+
+    // Merge the live intervals of all registers being spilled.
+    // This is done early, before insertSpills/insertReloads modify intervals.
+    for (Register Reg : RegsToSpill) {
+      if (!LIS.hasInterval(Reg))
+        continue;
+      LiveInterval &LI = LIS.getInterval(Reg);
+      if (LI.empty())
+        continue;
+
+      // For subreg spills with subranges, merge only the relevant lanes.
+      if (Info.SubRegIdx && LI.hasSubRanges()) {
+        const LaneBitmask SubRegLM = TRI.getSubRegIndexLaneMask(Info.SubRegIdx);
+        for (const LiveInterval::SubRange &SR : LI.subranges()) {
+          // Use overlap check (any()) rather than exact subset match. This is
+          // conservative: we may over-estimate when the stack slot is live,
+          // which makes stack slot coloring more conservative but safe. The
+          // alternative (under-estimating) would be dangerous as it could
+          // allow conflicting stack slots to share memory.
+          if ((SR.LaneMask & SubRegLM).any())
+            Info.StackInt->MergeSegmentsInAsValue(SR, VNI);
+        }
+      } else {
+        // Full register or no subranges - merge entire interval
+        Info.StackInt->MergeSegmentsInAsValue(LI, VNI);
+      }
+    }
+
+    LLVM_DEBUG(dbgs() << "Merged to stack int: " << *Info.StackInt << '\n');
   }
 }
 

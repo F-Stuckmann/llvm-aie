@@ -250,6 +250,22 @@ public:
   /// \param LIS Live intervals
   void foldSpillCopies(MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
                        const TargetRegisterInfo &TRI, LiveIntervals &LIS);
+
+  /// Merge the live ranges of spilled registers into their stack intervals.
+  /// This enables StackSlotColoring to coalesce non-overlapping stack slots.
+  ///
+  /// For each SubRegSpillInfo, merges the live intervals of the registers
+  /// being spilled into the stack interval. Must be called BEFORE
+  /// insertSpills/insertReloads while the original register intervals are
+  /// still valid.
+  ///
+  /// \param RegsToSpill Registers being spilled (from InlineSpiller)
+  /// \param TRI Target register info
+  /// \param LIS Live intervals
+  /// \param LSS Live stacks (for VNInfo allocation)
+  void mergeStackIntervals(ArrayRef<Register> RegsToSpill,
+                           const TargetRegisterInfo &TRI, LiveIntervals &LIS,
+                           LiveStacks &LSS);
 };
 
 /// AIESubRegSpiller - AIE-specific register spiller.
