@@ -115,18 +115,18 @@ void AIESubRegSpiller::spillAll() {
 
   SI.calcStack(MRI, TRI, VRM, LSS);
 
-  // Merge the spilled registers' live ranges into the stack intervals.
-  // This must happen BEFORE updateLIS while the original
-  // register intervals are still valid. Enables StackSlotColoring to coalesce
-  // non-overlapping stack slots.
-  SI.mergeStackIntervals(RegsToSpill, TRI, LIS, LSS);
-
   // todo: FIXME: perform optimizations
 
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] SpillInfo: "; SI.dump());
 
   SI.insertReloads(MRI, TII, TRI, VRM, LIS);
   SI.insertSpills(MRI, TII, TRI, VRM, LIS);
+
+  // Merge the stack intervals using actual spill/reload positions.
+  // This must happen AFTER insertSpills/insertReloads so that SpillSlotIndices
+  // and ReloadSlotIndices are populated. Enables StackSlotColoring to coalesce
+  // non-overlapping stack slots with precise liveness information.
+  SI.mergeStackIntervals(LIS, LSS);
 
   // Fold COPY chains in spill/reload sequences to reduce register pressure.
   // This must run before updateLIS to avoid issues with deleted instructions.
@@ -206,7 +206,8 @@ void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
         // Create a new SubRegSpillInfo for this unique subreg index
         LLVM_DEBUG(dbgs() << "Adding SubRegSpillInfo for subreg index: "
                           << SubRegIdx << '\n');
-        SubRegSpillInfo Info{SubRegIdx, VirtRegMap::NO_STACK_SLOT, nullptr, {}};
+        SubRegSpillInfo Info{
+            SubRegIdx, VirtRegMap::NO_STACK_SLOT, nullptr, {}, {}, {}};
         SubRegSpillInfos.push_back(Info);
         SeenSubRegIndices.insert(SubRegIdx);
       }
@@ -351,6 +352,12 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
   // MachineInstrSpan must be created with a bundle iterator, not a bundled MI.
   MachineInstrSpan MIS(SpillBefore, &MBB);
 
+  // Track store instructions per SubRegSpillInfo for SlotIndex computation.
+  // We collect them during the loop and compute SlotIndexes after
+  // InsertMachineInstrRangeInMaps adds them to the SlotIndexes.
+  SmallVector<std::pair<SubRegSpillInfo *, MachineInstr *>, 4>
+      StoreInstructions;
+
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
   Register NewVReg;
   bool IsTiedCase = false;
@@ -456,6 +463,10 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
     // register classes (e.g., spill_eS_to_eR needs a COPY to eR first)
     TII.storeRegToStackSlot(MBB, SpillBefore, RegToStore, StoreIsKill,
                             StackSlot, RC, &TRI, Register());
+
+    // Track the store instruction for later SlotIndex computation.
+    // The store instruction is the one just inserted before SpillBefore.
+    StoreInstructions.push_back({&Info, &*std::prev(SpillBefore)});
   }
 
   // Track all newly inserted instructions AND SpillInstr for COPY folding
@@ -472,6 +483,12 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
   // until all spills/reloads are inserted (handled in spillAll).
   // MIS.begin() points to the first newly inserted instruction.
   LIS.InsertMachineInstrRangeInMaps(MIS.begin(), SpillBefore);
+
+  // Now that instructions are in LIS maps, get their SlotIndexes.
+  for (auto &[InfoPtr, StoreMI] : StoreInstructions) {
+    SlotIndex StoreIdx = LIS.getInstructionIndex(*StoreMI).getRegSlot();
+    InfoPtr->SpillSlotIndices.push_back(StoreIdx);
+  }
 }
 
 void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
@@ -490,6 +507,11 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   const MachineBasicBlock::iterator InsertBefore(
       getBundleStart(MI->getIterator()));
   MachineInstrSpan MIS(InsertBefore, &MBB);
+
+  // Track load instructions per SubRegSpillInfo for SlotIndex computation.
+  // We collect them during the loop and compute SlotIndexes after
+  // InsertMachineInstrRangeInMaps adds them to the SlotIndexes.
+  SmallVector<std::pair<SubRegSpillInfo *, MachineInstr *>, 4> LoadInstructions;
 
   // Create a new virtual register for the parent register
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
@@ -571,6 +593,10 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     TII.loadRegFromStackSlot(MBB, InsertBefore, RegToLoad, StackSlot, RC, &TRI,
                              Register());
 
+    // Track the load instruction for later SlotIndex computation.
+    // The load instruction is the one just inserted before InsertBefore.
+    LoadInstructions.push_back({&Info, &*std::prev(InsertBefore)});
+
     if (IsSubReg) {
       // Copy from the temporary to the parent register's subregister
       auto CopyMIBuilder =
@@ -600,6 +626,12 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   // until all spills/reloads are inserted (handled in spillAll).
   LIS.InsertMachineInstrRangeInMaps(MIS.begin(),
                                     InsertBefore.getInstrIterator());
+
+  // Now that instructions are in LIS maps, get their SlotIndexes.
+  for (auto &[InfoPtr, LoadMI] : LoadInstructions) {
+    SlotIndex LoadIdx = LIS.getInstructionIndex(*LoadMI).getRegSlot();
+    InfoPtr->ReloadSlotIndices.push_back(LoadIdx);
+  }
 }
 
 void SpillInfo::insertSpills(MachineRegisterInfo &MRI,
@@ -686,49 +718,42 @@ void SpillInfo::dump() const {
   }
 }
 
-void SpillInfo::mergeStackIntervals(ArrayRef<Register> RegsToSpill,
-                                    const TargetRegisterInfo &TRI,
-                                    LiveIntervals &LIS, LiveStacks &LSS) {
+void SpillInfo::mergeStackIntervals(LiveIntervals &LIS, LiveStacks &LSS) {
   LLVM_DEBUG(dbgs() << "[mergeStackIntervals] Processing "
-                    << SubRegSpillInfos.size() << " SubRegSpillInfos with "
-                    << RegsToSpill.size() << " RegsToSpill\n");
+                    << SubRegSpillInfos.size() << " SubRegSpillInfos\n");
 
   for (auto &Info : SubRegSpillInfos) {
     if (!Info.StackInt)
       continue;
 
+    // Need at least one spill AND one reload to have a valid range.
+    // If either is empty, the stack slot isn't actually used in a meaningful
+    // way (e.g., dead spill or unreachable reload).
+    if (Info.SpillSlotIndices.empty() || Info.ReloadSlotIndices.empty()) {
+      LLVM_DEBUG(dbgs() << "  Skipping SubRegIdx " << Info.SubRegIdx
+                        << ": spills=" << Info.SpillSlotIndices.size()
+                        << ", reloads=" << Info.ReloadSlotIndices.size()
+                        << "\n");
+      continue;
+    }
+
     // Create the value number for this stack interval.
     VNInfo *VNI =
         Info.StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
 
-    // Merge the live intervals of all registers being spilled.
-    // This is done early, before insertSpills/insertReloads modify intervals.
-    for (Register Reg : RegsToSpill) {
-      if (!LIS.hasInterval(Reg))
-        continue;
-      LiveInterval &LI = LIS.getInterval(Reg);
-      if (LI.empty())
-        continue;
+    // Stack slot is live from earliest spill to latest reload.
+    // This is the precise liveness range based on actual store/load positions.
+    // FIXME: Can we use multiple intervals and not the worst case range?
+    SlotIndex Start = *llvm::min_element(Info.SpillSlotIndices);
+    SlotIndex End = *llvm::max_element(Info.ReloadSlotIndices);
 
-      // For subreg spills with subranges, merge only the relevant lanes.
-      if (Info.SubRegIdx && LI.hasSubRanges()) {
-        const LaneBitmask SubRegLM = TRI.getSubRegIndexLaneMask(Info.SubRegIdx);
-        for (const LiveInterval::SubRange &SR : LI.subranges()) {
-          // Use overlap check (any()) rather than exact subset match. This is
-          // conservative: we may over-estimate when the stack slot is live,
-          // which makes stack slot coloring more conservative but safe. The
-          // alternative (under-estimating) would be dangerous as it could
-          // allow conflicting stack slots to share memory.
-          if ((SR.LaneMask & SubRegLM).any())
-            Info.StackInt->MergeSegmentsInAsValue(SR, VNI);
-        }
-      } else {
-        // Full register or no subranges - merge entire interval
-        Info.StackInt->MergeSegmentsInAsValue(LI, VNI);
-      }
-    }
+    // Ensure valid range (Start < End). If the last reload happens before
+    // the first spill (unusual but possible with tied operands), skip.
+    if (Start < End)
+      Info.StackInt->addSegment(LiveInterval::Segment(Start, End, VNI));
 
-    LLVM_DEBUG(dbgs() << "Merged to stack int: " << *Info.StackInt << '\n');
+    LLVM_DEBUG(dbgs() << "Stack int [" << Start << ", " << End
+                      << "): " << *Info.StackInt << '\n');
   }
 }
 

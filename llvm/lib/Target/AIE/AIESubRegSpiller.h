@@ -18,6 +18,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/InlineSpiller.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 namespace llvm {
@@ -57,6 +58,14 @@ struct SubRegSpillInfo {
   /// register and the stack slot. They are assigned to StackSlot by
   /// VirtRegMap and will be eliminated by the register allocator.
   SmallVector<Register, 8> SpillVRegs;
+
+  /// SlotIndices of store instructions that spill to this stack slot.
+  /// Used to compute precise stack interval liveness.
+  SmallVector<SlotIndex, 4> SpillSlotIndices;
+
+  /// SlotIndices of load instructions that reload from this stack slot.
+  /// Used to compute precise stack interval liveness.
+  SmallVector<SlotIndex, 4> ReloadSlotIndices;
 
   /// Print debug information for this SubRegSpillInfo.
   void dump(const MachineRegisterInfo *MRI,
@@ -254,18 +263,15 @@ public:
   /// Merge the live ranges of spilled registers into their stack intervals.
   /// This enables StackSlotColoring to coalesce non-overlapping stack slots.
   ///
-  /// For each SubRegSpillInfo, merges the live intervals of the registers
-  /// being spilled into the stack interval. Must be called BEFORE
-  /// insertSpills/insertReloads while the original register intervals are
-  /// still valid.
+  /// For each SubRegSpillInfo, creates a stack interval segment from the
+  /// earliest spill (store) to the latest reload (load) position. This
+  /// provides precise liveness tracking based on actual instruction positions.
+  /// Must be called AFTER insertSpills/insertReloads so that SpillSlotIndices
+  /// and ReloadSlotIndices are populated.
   ///
-  /// \param RegsToSpill Registers being spilled (from InlineSpiller)
-  /// \param TRI Target register info
   /// \param LIS Live intervals
   /// \param LSS Live stacks (for VNInfo allocation)
-  void mergeStackIntervals(ArrayRef<Register> RegsToSpill,
-                           const TargetRegisterInfo &TRI, LiveIntervals &LIS,
-                           LiveStacks &LSS);
+  void mergeStackIntervals(LiveIntervals &LIS, LiveStacks &LSS);
 };
 
 /// AIESubRegSpiller - AIE-specific register spiller.
