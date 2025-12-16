@@ -102,6 +102,15 @@ void SubregSpiller::VirtRegInfoAndOps::dump(
 }
 
 void AIESubRegSpiller::spillAll() {
+  // Skip if this register was already spilled (has a stack slot assigned).
+  // Check Edit->getReg() (not Original) because siblings sharing the same
+  // Original still need individual spill processing.
+  if (VRM.getStackSlot(Edit->getReg()) != VirtRegMap::NO_STACK_SLOT) {
+    LLVM_DEBUG(dbgs() << "[SubRegSpiller] Skipping already-spilled register "
+                      << printReg(Edit->getReg()) << "\n");
+    return;
+  }
+
   SpillInfo SI = collectSpillInfo();
 
   SI.calcStack(MRI, TRI, VRM, LSS);
@@ -191,7 +200,7 @@ void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
         // Create a new SubRegSpillInfo for this unique subreg index
         LLVM_DEBUG(dbgs() << "Adding SubRegSpillInfo for subreg index: "
                           << SubRegIdx << '\n');
-        SubRegSpillInfo Info{SubRegIdx, 0, nullptr, {}};
+        SubRegSpillInfo Info{SubRegIdx, VirtRegMap::NO_STACK_SLOT, nullptr, {}};
         SubRegSpillInfos.push_back(Info);
         SeenSubRegIndices.insert(SubRegIdx);
       }
@@ -204,13 +213,33 @@ void SpillInfo::calcStack(MachineRegisterInfo &MRI,
                           LiveStacks &LSS) {
 
   for (auto &Info : SubRegSpillInfos) {
-    // Get register class from the original register being spilled
-    const TargetRegisterClass *RC = MRI.getRegClass(OrigReg);
-    if (Info.SubRegIdx) {
-      RC = TRI.getSubRegisterClass(RC, Info.SubRegIdx);
-    }
 
+    // Create new slot
+    const TargetRegisterClass *RC = MRI.getRegClass(OrigReg);
+    if (Info.SubRegIdx)
+      RC = TRI.getSubRegisterClass(RC, Info.SubRegIdx);
+
+    LLVM_DEBUG(dbgs() << "Creating spill slot for " << printReg(OrigReg)
+                      << "\n");
     Info.StackSlot = VRM.createSpillSlot(RC);
+    LLVM_DEBUG(dbgs() << "Created spill slot: " << Info.StackSlot << "\n");
+  }
+
+  // Mark OrigReg as spilled by assigning it to a stack slot.
+  // This allows early-exit on subsequent spill attempts for the same register.
+  // FIXME: This is a hack to get the marker slot for the original register. The
+  // original register may be spilled via individual Subregs and thus actually
+  // map to multiple stack slots.
+  if (!SubRegSpillInfos.empty() &&
+      VRM.getStackSlot(OrigReg) == VirtRegMap::NO_STACK_SLOT) {
+    const int MarkerSlot = SubRegSpillInfos[0].StackSlot;
+    VRM.assignVirt2StackSlot(OrigReg, MarkerSlot);
+    LLVM_DEBUG({
+      dbgs() << "Assigned marker stack slot ";
+      MachineOperand::printStackObjectReference(dbgs(), MarkerSlot,
+                                                /*IsFixed=*/false, /*Name=*/"");
+      dbgs() << " to OrigReg " << printReg(OrigReg) << "\n";
+    });
   }
 }
 
@@ -329,6 +358,9 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
         getVirtRegInfoAndOps(*MI, ToSpill);
     // Create a new virtual register for the parent register
     NewVReg = MRI.createVirtualRegister(OrigRC);
+    VRM.setIsSplitFromReg(NewVReg, OrigReg);
+    assert(VRM.getOriginal(NewVReg) == OrigReg &&
+           "Temp register should share Original with spilled register");
     RegsForLISUpdate.push_back(NewVReg);
     // Replace the original def operand with the new register
     SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
@@ -381,6 +413,9 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
     if (IsSubReg) {
       // Create a new virtual register
       Register TempVReg = MRI.createVirtualRegister(RC);
+      VRM.setIsSplitFromReg(TempVReg, OrigReg);
+      assert(VRM.getOriginal(TempVReg) == OrigReg &&
+             "Temp register should share Original with spilled register");
       Info.SpillVRegs.push_back(TempVReg);
       RegsForLISUpdate.push_back(TempVReg);
 
@@ -446,6 +481,9 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   // Create a new virtual register for the parent register
   const TargetRegisterClass *OrigRC = MRI.getRegClass(OrigReg);
   Register NewVReg = MRI.createVirtualRegister(OrigRC);
+  VRM.setIsSplitFromReg(NewVReg, OrigReg);
+  assert(VRM.getOriginal(NewVReg) == OrigReg &&
+         "Temp register should share Original with spilled register");
   RegsForLISUpdate.push_back(NewVReg);
 
   // Compute which lanes are alive at the use slot. We only want to reload
@@ -502,6 +540,9 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
     if (IsSubReg) {
       // Create temp register and assign to stack slot
       RegToLoad = MRI.createVirtualRegister(RC);
+      VRM.setIsSplitFromReg(RegToLoad, OrigReg);
+      assert(VRM.getOriginal(RegToLoad) == OrigReg &&
+             "Temp register should share Original with spilled register");
       RegsForLISUpdate.push_back(RegToLoad);
       NumSubRegReloads++;
     } else {
@@ -575,7 +616,9 @@ void SpillInfo::insertReloads(MachineRegisterInfo &MRI,
 void SubRegSpillInfo::dump(const MachineRegisterInfo *MRI,
                            const TargetRegisterInfo *TRI) const {
   dbgs() << "    SubRegIdx: " << SubRegIdx;
-  dbgs() << ", StackSlot: " << StackSlot;
+  dbgs() << ", StackSlot: ";
+  MachineOperand::printStackObjectReference(dbgs(), StackSlot,
+                                            /*IsFixed=*/false, /*Name=*/"");
   dbgs() << ", StackInt: " << StackInt;
   dbgs() << ", SpillVRegs: [";
   for (unsigned I = 0; I < SpillVRegs.size(); I++) {
