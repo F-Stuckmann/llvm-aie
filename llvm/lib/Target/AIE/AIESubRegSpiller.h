@@ -134,6 +134,13 @@ class SpillInfo {
   ///  added.
   SmallVector<Register, 16> RegsForLISUpdate;
 
+  /// Add a register to the LIS update list if not already present.
+  /// Only adds virtual registers to avoid tracking physical registers.
+  void addRegForLISUpdate(Register Reg) {
+    if (Reg.isVirtual() && !llvm::is_contained(RegsForLISUpdate, Reg))
+      RegsForLISUpdate.push_back(Reg);
+  }
+
   /// All instructions inserted during spill/reload insertion.
   /// Includes COPYs and memory operations for use by foldSpillCopies().
   SmallVector<MachineInstr *, 16> ModifiedAndInsertedMIs;
@@ -168,10 +175,6 @@ class SpillInfo {
                     MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
                     const TargetRegisterInfo &TRI, VirtRegMap &VRM,
                     LiveIntervals &LIS);
-
-  void updateLIS(MachineBasicBlock::iterator Begin,
-                 MachineBasicBlock::iterator End, LiveIntervals &LIS,
-                 const bool ConsiderBeginInLISUpdate = false);
 
 public:
   /// Constructor - Initialize SpillInfo for the given register.

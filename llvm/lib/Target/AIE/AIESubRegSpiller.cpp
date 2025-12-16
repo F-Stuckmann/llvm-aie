@@ -103,8 +103,14 @@ void SubregSpiller::VirtRegInfoAndOps::dump(
 
 void AIESubRegSpiller::spillAll() {
   // Skip if this register was already spilled (has a stack slot assigned).
-  // Check Edit->getReg() (not Original) because siblings sharing the same
-  // Original still need individual spill processing.
+  // We check Edit->getReg() (not Original) because:
+  // - The base collectRegsToSpill() only collects "snippet" siblings (simple
+  //   copies with limited usage), not ALL siblings sharing the same Original.
+  // - Non-snippet siblings will come through spill() separately when the
+  //   allocator fails to find a physical register for them.
+  // - Checking Original's stack slot would incorrectly skip these non-snippet
+  //   siblings since the Original gets a marker slot after the first sibling
+  //   is processed.
   if (VRM.getStackSlot(Edit->getReg()) != VirtRegMap::NO_STACK_SLOT) {
     LLVM_DEBUG(dbgs() << "[SubRegSpiller] Skipping already-spilled register "
                       << printReg(Edit->getReg()) << "\n");
@@ -315,28 +321,6 @@ void SpillInfo::updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
   }
 }
 
-void SpillInfo::updateLIS(MachineBasicBlock::iterator Begin,
-                          MachineBasicBlock::iterator End, LiveIntervals &LIS,
-                          const bool ConsiderBeginInLISUpdate) {
-  LLVM_DEBUG(dbgs() << "Updating LIS for range:\n";);
-  LIS.InsertMachineInstrRangeInMaps(Begin, End);
-
-  const MachineBasicBlock::iterator StartDefMI =
-      ConsiderBeginInLISUpdate ? std::prev(Begin) : Begin;
-
-  // Collect Defs
-  SmallVector<Register, 8> Defs;
-  for (const MachineInstr &MI : make_range(StartDefMI, End)) {
-    LLVM_DEBUG(dbgs() << "    " << MI;);
-    for (const MachineOperand &MO : MI.all_defs()) {
-      LLVM_DEBUG(dbgs() << "        " << MO << "\n";);
-      const Register Reg = MO.getReg();
-      Defs.push_back(Reg);
-    }
-  }
-  updateLIS(Defs, LIS);
-}
-
 void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
                             bool IsKill, MachineRegisterInfo &MRI,
                             const TargetInstrInfo &TII,
@@ -382,7 +366,7 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
     VRM.setIsSplitFromReg(NewVReg, OrigReg);
     assert(VRM.getOriginal(NewVReg) == OrigReg &&
            "Temp register should share Original with spilled register");
-    RegsForLISUpdate.push_back(NewVReg);
+    addRegForLISUpdate(NewVReg);
     // Replace the original def operand with the new register
     SpillerHelper::rewriteOperands(VRIAndOps.Ops, NewVReg);
   }
@@ -438,7 +422,7 @@ void SpillInfo::insertSpill(MachineInstr *MI, const Register ToSpill,
       assert(VRM.getOriginal(TempVReg) == OrigReg &&
              "Temp register should share Original with spilled register");
       Info.SpillVRegs.push_back(TempVReg);
-      RegsForLISUpdate.push_back(TempVReg);
+      addRegForLISUpdate(TempVReg);
 
       // Create COPY: TempVReg = COPY NewVReg:subreg
       auto CopyBuilder = BuildMI(MBB, SpillBefore, MI->getDebugLoc(),
@@ -522,7 +506,7 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
   VRM.setIsSplitFromReg(NewVReg, OrigReg);
   assert(VRM.getOriginal(NewVReg) == OrigReg &&
          "Temp register should share Original with spilled register");
-  RegsForLISUpdate.push_back(NewVReg);
+  addRegForLISUpdate(NewVReg);
 
   // Compute which lanes are alive at the use slot. We only want to reload
   // subregs that are actually used at this instruction. SubRegSpillInfos
@@ -581,7 +565,7 @@ void SpillInfo::insertReload(MachineInstr *MI, Register ToBeReplacedReg,
       VRM.setIsSplitFromReg(RegToLoad, OrigReg);
       assert(VRM.getOriginal(RegToLoad) == OrigReg &&
              "Temp register should share Original with spilled register");
-      RegsForLISUpdate.push_back(RegToLoad);
+      addRegForLISUpdate(RegToLoad);
       NumSubRegReloads++;
     } else {
       // todo: remove this codepath, use regular inlinespiller
@@ -967,8 +951,6 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
   }
 
   // Add source registers that were extended to the list for LIS update
-  for (Register Reg : SrcRegsExtended) {
-    if (!llvm::is_contained(RegsForLISUpdate, Reg))
-      RegsForLISUpdate.push_back(Reg);
-  }
+  for (Register Reg : SrcRegsExtended)
+    addRegForLISUpdate(Reg);
 }
