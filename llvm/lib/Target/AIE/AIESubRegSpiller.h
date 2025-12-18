@@ -339,6 +339,11 @@ protected:
   ///
   /// \param SI SpillInfo describing where to insert reloads
   void insertReloads(SpillInfo &SI);
+
+  /// Collect dead definitions from RegsToSpill and mark them.
+  /// Dead defs inside bundles need special handling since
+  /// addRegisterDead() only searches bundle headers.
+  void collectDeadDefs();
 };
 
 } // namespace llvm

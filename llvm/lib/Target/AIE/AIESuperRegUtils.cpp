@@ -109,7 +109,7 @@ void rewriteFullCopy(MachineInstr &CopyMI, LiveIntervals &LIS,
       TRI.getSubRegSplit(MRI.getRegClass(DstReg)->getID());
 
   unsigned AdditionalFlags = RegState::Undef;
-  SmallSet<Register, 8> RegistersToRepair;
+  SmallSet<Register, 16> RegistersToRepair;
   for (int SubRegIdx : CopySubRegs) {
     if ((LiveSrcLanes & TRI.getSubRegIndexLaneMask(SubRegIdx)).none()) {
       LLVM_DEBUG(dbgs() << "        Skip undefined subreg "
@@ -140,9 +140,7 @@ void rewriteFullCopy(MachineInstr &CopyMI, LiveIntervals &LIS,
   CopyMI.eraseFromParent();
 
   // Update Liveinterval of all modified Registers
-  SmallVector<Register, 8> RegsVec(RegistersToRepair.begin(),
-                                   RegistersToRepair.end());
-  repairLiveIntervals(RegsVec, LIS, VRM, LRM);
+  repairLiveIntervals(RegistersToRepair, LIS, VRM, LRM);
 }
 
 /// Return a mask of all the lanes that are live at \p Index
@@ -286,7 +284,7 @@ static void repairLiveInterval(Register R, LiveIntervals &LIS, VirtRegMap *VRM,
   LIS.shrinkToUses(&LIS.getInterval(R), Dead);
 }
 
-void repairLiveIntervals(ArrayRef<Register> RegistersToRepair,
+void repairLiveIntervals(const SmallSet<Register, 16> &RegistersToRepair,
                          LiveIntervals &LIS, VirtRegMap &VRM,
                          LiveRegMatrix &LRM,
                          SmallVectorImpl<MachineInstr *> *Dead) {

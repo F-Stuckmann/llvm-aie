@@ -136,7 +136,7 @@ static void expandCopyBundles(RegRewriteInfo &RegistersToRewrite,
                               LiveIntervals &LIS, VirtRegMap &VRM,
                               LiveRegMatrix &LRM) {
 
-  SmallSet<Register, 8> RegistersToRepair;
+  SmallSet<Register, 16> RegistersToRepair;
   for (auto [VReg, SubRegs] : RegistersToRewrite) {
 
     for (MachineInstr &MI : MRI.def_instructions(VReg)) {
@@ -186,9 +186,7 @@ static void expandCopyBundles(RegRewriteInfo &RegistersToRewrite,
     }
   }
 
-  SmallVector<Register, 8> RegsVec(RegistersToRepair.begin(),
-                                   RegistersToRepair.end());
-  AIESuperRegUtils::repairLiveIntervals(RegsVec, LIS, VRM, LRM);
+  AIESuperRegUtils::repairLiveIntervals(RegistersToRepair, LIS, VRM, LRM);
 }
 
 bool AIEUnallocatedSuperRegRewriter::runOnMachineFunction(MachineFunction &MF) {

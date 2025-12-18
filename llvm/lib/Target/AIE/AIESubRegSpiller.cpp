@@ -141,9 +141,8 @@ void AIESubRegSpiller::spillAll() {
   // Update LIS for all newly created registers. This is deferred until after
   // all spills/reloads are inserted so intervals are computed correctly
   // (especially for tied operands where reload and spill share the same reg).
-  const auto &RegsToUpdate = SI.getRegsForLISUpdate();
-  SmallVector<Register, 16> RegsVec(RegsToUpdate.begin(), RegsToUpdate.end());
-  AIESuperRegUtils::repairLiveIntervals(RegsVec, LIS, VRM, LRM);
+  AIESuperRegUtils::repairLiveIntervals(SI.getRegsForLISUpdate(), LIS, VRM,
+                                        LRM);
 
   SpillInfos.push_back(SI);
   LLVM_DEBUG(
@@ -151,11 +150,27 @@ void AIESubRegSpiller::spillAll() {
       LIS.dump());
 
   // Update LiveIntervals for the original register and the edited register.
-  SmallVector<Register, 2> EditRegs = {SI.getReg()};
-  if (Edit->getReg() != SI.getReg())
-    EditRegs.push_back(Edit->getReg());
+  SmallSet<Register, 16> EditRegs;
+  EditRegs.insert(SI.getReg());
+  EditRegs.insert(Edit->getReg());
   AIESuperRegUtils::repairLiveIntervals(EditRegs, LIS, VRM, LRM);
 
+  collectDeadDefs();
+  eliminateDeadDefs();
+
+  // The VReg being spilled has not yet been allocated to a Physical Register.
+  // Due to a lack of high level methods we cannot tell RegAlloc to put the
+  // Original VReg back on the allocation queue.
+  // Therefore, we delete the spilled virtual register and create new VRegs
+  // for the shorted LiveIntervals between Spill/Reload and Def/Use of the
+  // original register. MRI will take care of notifying RegAlloc to enque the
+  // new VRegs.
+  deleteSpilledVirtualRegs();
+  LLVM_DEBUG(dbgs() << "[SubRegSpiller] After deleteSpilledVirtualRegs:\n";
+             LIS.dump());
+}
+
+void AIESubRegSpiller::collectDeadDefs() {
   // Collect dead definitions from RegsToSpill.
   // A def is dead if its LiveInterval segment ends at the dead slot [R, D).
   // We manually handle this because computeDeadValues/addRegisterDead doesn't
@@ -194,18 +209,6 @@ void AIESubRegSpiller::spillAll() {
         dbgs() << "  " << *MI;
     }
   });
-  eliminateDeadDefs();
-
-  // The VReg being spilled has not yet been allocated to a Physical Register.
-  // Due to a lack of high level methods we cannot tell RegAlloc to put the
-  // Original VReg back on the allocation queue.
-  // Therefore, we delete the spilled virtual register and create new VRegs
-  // for the shorted LiveIntervals between Spill/Reload and Def/Use of the
-  // original register. MRI will take care of notifying RegAlloc to enque the
-  // new VRegs.
-  deleteSpilledVirtualRegs();
-  LLVM_DEBUG(dbgs() << "[SubRegSpiller] After deleteSpilledVirtualRegs:\n";
-             LIS.dump());
 }
 
 SpillInfo AIESubRegSpiller::collectSpillInfo() const {
