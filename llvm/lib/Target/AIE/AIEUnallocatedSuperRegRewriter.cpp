@@ -186,7 +186,9 @@ static void expandCopyBundles(RegRewriteInfo &RegistersToRewrite,
     }
   }
 
-  AIESuperRegUtils::repairLiveIntervals(RegistersToRepair, VRM, LRM, LIS);
+  SmallVector<Register, 8> RegsVec(RegistersToRepair.begin(),
+                                   RegistersToRepair.end());
+  AIESuperRegUtils::repairLiveIntervals(RegsVec, LIS, VRM, LRM);
 }
 
 bool AIEUnallocatedSuperRegRewriter::runOnMachineFunction(MachineFunction &MF) {

@@ -141,8 +141,9 @@ void AIESubRegSpiller::spillAll() {
   // Update LIS for all newly created registers. This is deferred until after
   // all spills/reloads are inserted so intervals are computed correctly
   // (especially for tied operands where reload and spill share the same reg).
-  AIESuperRegUtils::repairLiveIntervals(SI.getRegsForLISUpdate(), VRM, LRM,
-                                        LIS);
+  const auto &RegsToUpdate = SI.getRegsForLISUpdate();
+  SmallVector<Register, 16> RegsVec(RegsToUpdate.begin(), RegsToUpdate.end());
+  AIESuperRegUtils::repairLiveIntervals(RegsVec, LIS, VRM, LRM);
 
   SpillInfos.push_back(SI);
   LLVM_DEBUG(
@@ -153,7 +154,47 @@ void AIESubRegSpiller::spillAll() {
   SmallVector<Register, 2> EditRegs = {SI.getReg()};
   if (Edit->getReg() != SI.getReg())
     EditRegs.push_back(Edit->getReg());
-  SI.updateLIS(EditRegs, LIS, true);
+  AIESuperRegUtils::repairLiveIntervals(EditRegs, LIS, VRM, LRM);
+
+  // Collect dead definitions from RegsToSpill.
+  // A def is dead if its LiveInterval segment ends at the dead slot [R, D).
+  // We manually handle this because computeDeadValues/addRegisterDead doesn't
+  // find defs inside bundled instructions - it only searches bundle headers.
+  for (Register Reg : RegsToSpill) {
+    if (!LIS.hasInterval(Reg))
+      continue;
+    LiveInterval &LI = LIS.getInterval(Reg);
+    for (VNInfo *VNI : LI.valnos) {
+      if (VNI->isUnused() || VNI->isPHIDef())
+        continue;
+      LiveRange::iterator I = LI.FindSegmentContaining(VNI->def);
+      if (I == LI.end() || I->end != VNI->def.getDeadSlot())
+        continue;
+      // This is a dead def - segment ends at dead slot
+      MachineInstr *MI = LIS.getInstructionFromIndex(VNI->def);
+      if (!MI)
+        continue;
+      // Use MIBundleOperands to mark dead defs inside bundles.
+      // addRegisterDead() only searches the bundle header's operands.
+      for (MIBundleOperands MO(*MI); MO.isValid(); ++MO) {
+        if (MO->isReg() && MO->isDef() && MO->getReg() == Reg)
+          MO->setIsDead();
+      }
+      if (MI->allDefsAreDead()) {
+        LLVM_DEBUG(dbgs() << "[SubRegSpiller] Dead def: " << *MI);
+        DeadDefs.push_back(MI);
+      }
+    }
+  }
+
+  LLVM_DEBUG({
+    if (!DeadDefs.empty()) {
+      dbgs() << "[SubRegSpiller] dead defs Found: " << DeadDefs.size() << "\n";
+      for (const MachineInstr *MI : DeadDefs)
+        dbgs() << "  " << *MI;
+    }
+  });
+  eliminateDeadDefs();
 
   // The VReg being spilled has not yet been allocated to a Physical Register.
   // Due to a lack of high level methods we cannot tell RegAlloc to put the
@@ -300,24 +341,6 @@ void SpillInfo::update(const Register Reg, MachineRegisterInfo &MRI) {
       LLVM_DEBUG(dbgs() << "Adding reload location: " << MI);
       ReloadLocations.push_back(Entry);
     }
-  }
-}
-
-void SpillInfo::updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
-                          const bool SkipNoInterval) {
-  for (auto Reg : Regs) {
-
-    if (SkipNoInterval && !LIS.hasInterval(Reg))
-      continue;
-
-    if (LIS.hasInterval(Reg)) {
-      LIS.removeInterval(Reg);
-    }
-
-    LIS.createAndComputeVirtRegInterval(Reg);
-    LIS.shrinkToUses(&LIS.getInterval(Reg));
-    LLVM_DEBUG(dbgs() << "Updated LIS for reg: " << printReg(Reg) << "\n";
-               LIS.getInterval(Reg).dump());
   }
 }
 
@@ -947,7 +970,7 @@ void SpillInfo::foldSpillCopies(MachineRegisterInfo &MRI,
   for (Register Reg : RegsToRemove) {
     if (Reg.isVirtual() && LIS.hasInterval(Reg))
       LIS.removeInterval(Reg);
-    llvm::erase(RegsForLISUpdate, Reg);
+    RegsForLISUpdate.erase(Reg);
   }
 
   // Add source registers that were extended to the list for LIS update

@@ -132,13 +132,13 @@ class SpillInfo {
   /// a Dead flag is added, it is not possible to remove it afterwards
   ///  with a LI update! Therefore, only update LIS once all regs have been
   ///  added.
-  SmallVector<Register, 16> RegsForLISUpdate;
+  SmallSet<Register, 16> RegsForLISUpdate;
 
   /// Add a register to the LIS update list if not already present.
   /// Only adds virtual registers to avoid tracking physical registers.
   void addRegForLISUpdate(Register Reg) {
-    if (Reg.isVirtual() && !llvm::is_contained(RegsForLISUpdate, Reg))
-      RegsForLISUpdate.push_back(Reg);
+    if (Reg.isVirtual())
+      RegsForLISUpdate.insert(Reg);
   }
 
   /// All instructions inserted during spill/reload insertion.
@@ -237,16 +237,15 @@ public:
 
   /// Get the registers that need LiveInterval updates.
   ///
-  /// \return Array of registers needing LIS updates
-  ArrayRef<Register> getRegsForLISUpdate() const { return RegsForLISUpdate; }
+  /// \return Set of registers needing LIS updates
+  const SmallSet<Register, 16> &getRegsForLISUpdate() const {
+    return RegsForLISUpdate;
+  }
 
   /// Dump the SpillInfo for debugging purposes.
   /// Prints the register, defining operands, stack slots, spill virtual
   /// registers, and spill/reload locations.
   void dump() const;
-
-  void updateLIS(ArrayRef<Register> Regs, LiveIntervals &LIS,
-                 const bool SkipNoInterval = false);
 
   /// Fold COPYs in spill/reload sequences using register propagation.
   /// Iterates over InsertedMIs and for each COPY, replaces all uses of the

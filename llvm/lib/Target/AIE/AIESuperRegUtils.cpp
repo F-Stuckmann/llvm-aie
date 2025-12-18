@@ -140,7 +140,9 @@ void rewriteFullCopy(MachineInstr &CopyMI, LiveIntervals &LIS,
   CopyMI.eraseFromParent();
 
   // Update Liveinterval of all modified Registers
-  repairLiveIntervals(RegistersToRepair, VRM, LRM, LIS);
+  SmallVector<Register, 8> RegsVec(RegistersToRepair.begin(),
+                                   RegistersToRepair.end());
+  repairLiveIntervals(RegsVec, LIS, VRM, LRM);
 }
 
 /// Return a mask of all the lanes that are live at \p Index
@@ -259,38 +261,37 @@ bool isRegUsedBy2DOr3DInstruction(const MachineRegisterInfo &MRI,
       });
 }
 
-void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
-                         VirtRegMap &VRM, LiveRegMatrix &LRM,
-                         LiveIntervals &LIS) {
-  for (Register R : RegistersToRepair) {
-    assert(R.isVirtual() && "Repairing physical registers is not supported");
+static void repairLiveInterval(Register R, LiveIntervals &LIS, VirtRegMap *VRM,
+                               LiveRegMatrix *LRM,
+                               SmallVectorImpl<MachineInstr *> *Dead) {
+  assert(R.isVirtual() && "Repairing physical registers is not supported");
 
-    if (!LIS.hasInterval(R))
-      continue;
+  if (!LIS.hasInterval(R))
+    return;
 
-    if (VRM.hasPhys(R)) {
-      const MCRegister PhysReg = VRM.getPhys(R);
-      const LiveInterval &OldLI = LIS.getInterval(R);
-      LRM.unassign(OldLI);
-      LIS.removeInterval(R);
-      const LiveInterval &LI = LIS.createAndComputeVirtRegInterval(R);
-      LRM.assign(LI, PhysReg);
-    } else {
-      LIS.removeInterval(R);
-      LIS.createAndComputeVirtRegInterval(R);
-    }
-
-    // After recomputing, shrink the interval to remove any invalid segments
-    // This is important for registers with undefined definitions.
-    LIS.shrinkToUses(&LIS.getInterval(R));
+  if (VRM && VRM->hasPhys(R)) {
+    const MCRegister PhysReg = VRM->getPhys(R);
+    const LiveInterval &OldLI = LIS.getInterval(R);
+    LRM->unassign(OldLI);
+    LIS.removeInterval(R);
+    const LiveInterval &LI = LIS.createAndComputeVirtRegInterval(R);
+    LRM->assign(LI, PhysReg);
+  } else {
+    LIS.removeInterval(R);
+    LIS.createAndComputeVirtRegInterval(R);
   }
+
+  // After recomputing, shrink the interval to remove any invalid segments.
+  // This is important for registers with undefined definitions.
+  LIS.shrinkToUses(&LIS.getInterval(R), Dead);
 }
 
-void repairLiveIntervals(ArrayRef<Register> RegistersToRepair, VirtRegMap &VRM,
-                         LiveRegMatrix &LRM, LiveIntervals &LIS) {
-  SmallSet<Register, 8> RegSet(RegistersToRepair.begin(),
-                               RegistersToRepair.end());
-  repairLiveIntervals(RegSet, VRM, LRM, LIS);
+void repairLiveIntervals(ArrayRef<Register> RegistersToRepair,
+                         LiveIntervals &LIS, VirtRegMap &VRM,
+                         LiveRegMatrix &LRM,
+                         SmallVectorImpl<MachineInstr *> *Dead) {
+  for (Register R : RegistersToRepair)
+    repairLiveInterval(R, LIS, &VRM, &LRM, Dead);
 }
 
 } // namespace llvm::AIESuperRegUtils

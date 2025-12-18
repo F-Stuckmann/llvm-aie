@@ -32,6 +32,7 @@ class SlotIndexes;
 class VirtRegMap;
 class LiveRegMatrix;
 class LiveDebugVariables;
+template <typename T> class SmallVectorImpl;
 } // namespace llvm
 
 namespace llvm::AIESuperRegUtils {
@@ -74,12 +75,17 @@ void rewriteSuperReg(Register Reg, std::optional<Register> AssignedPhysReg,
 bool isRegUsedBy2DOr3DInstruction(const MachineRegisterInfo &MRI,
                                   const Register &R);
 
-void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
-                         VirtRegMap &VRM, LiveRegMatrix &LRM,
-                         LiveIntervals &LIS);
+/// Recompute live intervals for the given registers.
+/// For registers with assigned physical registers, updates the LiveRegMatrix.
+void repairLiveIntervals(ArrayRef<Register> RegistersToRepair,
+                         LiveIntervals &LIS, VirtRegMap &VRM,
+                         LiveRegMatrix &LRM,
+                         SmallVectorImpl<MachineInstr *> *Dead = nullptr);
 
-void repairLiveIntervals(ArrayRef<Register> RegistersToRepair, VirtRegMap &VRM,
-                         LiveRegMatrix &LRM, LiveIntervals &LIS);
+/// Recompute live intervals for unassigned registers (no VRM/LRM handling).
+void repairLiveIntervals(ArrayRef<Register> RegistersToRepair,
+                         LiveIntervals &LIS,
+                         SmallVectorImpl<MachineInstr *> *Dead = nullptr);
 
 } // namespace llvm::AIESuperRegUtils
 
