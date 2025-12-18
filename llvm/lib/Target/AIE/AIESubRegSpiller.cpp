@@ -40,6 +40,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
 
+static cl::opt<bool>
+    SpillFullRegs("aie-subregspill-legacy", cl::Hidden, cl::init(false),
+                  cl::desc("SubReg Spilling in legacy mode, spill full "
+                           "registers instead of partial ones."));
+
 STATISTIC(NumSubRegSpills, "Number of subregister spills inserted");
 STATISTIC(NumSubRegReloads, "Number of subregister reloads inserted");
 STATISTIC(NumFoldedCopies, "Number of COPYs folded in spill/reload sequences");
@@ -167,7 +172,7 @@ void AIESubRegSpiller::spillAll() {
   // new VRegs.
   deleteSpilledVirtualRegs();
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] After deleteSpilledVirtualRegs:\n";
-             LIS.dump());
+             LIS.dump(); VRM.dump());
 }
 
 void AIESubRegSpiller::collectDeadDefs() {
@@ -228,6 +233,7 @@ SpillInfo AIESubRegSpiller::collectSpillInfo() const {
 
 void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
                                  const MachineRegisterInfo &MRI) {
+  // FIXME: What happens if RegsToSpill does not contain all the Registers?
   // Track which subreg indices we've already created entries for
   SmallSet<unsigned, 8> SeenSubRegIndices;
 
@@ -236,6 +242,10 @@ void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
       if (MI.isDebugValue()) {
         LLVM_DEBUG(dbgs() << "Skipping debug value: " << MI);
         continue;
+      }
+      if (SpillFullRegs) {
+        SubRegSpillInfos.push_back({});
+        return;
       }
 
       const auto [RegInfo, Ops] = getVirtRegInfoAndOps(MI, Reg);
@@ -255,11 +265,11 @@ void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
 
         // Create a new SubRegSpillInfo for this unique subreg index
         LLVM_DEBUG(dbgs() << "Adding SubRegSpillInfo for subreg index: "
-                          << SubRegIdx << '\n');
-        SubRegSpillInfo Info{
-            SubRegIdx, VirtRegMap::NO_STACK_SLOT, nullptr, {}, {}, {}};
-        SubRegSpillInfos.push_back(Info);
+        << SubRegIdx << '\n');
+        SubRegSpillInfos.emplace_back(SubRegIdx);
+        
         SeenSubRegIndices.insert(SubRegIdx);
+
       }
     }
   }

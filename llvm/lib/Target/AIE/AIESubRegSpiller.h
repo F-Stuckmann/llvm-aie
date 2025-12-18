@@ -67,6 +67,13 @@ struct SubRegSpillInfo {
   /// Used to compute precise stack interval liveness.
   SmallVector<SlotIndex, 4> ReloadSlotIndices;
 
+  SubRegSpillInfo() : SubRegSpillInfo(0) {}
+
+  SubRegSpillInfo(const unsigned SubRegIdx)
+      : SubRegIdx(SubRegIdx), StackSlot(VirtRegMap::NO_STACK_SLOT),
+        StackInt(nullptr), SpillVRegs({}), SpillSlotIndices({}),
+        ReloadSlotIndices({}) {}
+
   /// Print debug information for this SubRegSpillInfo.
   void dump(const MachineRegisterInfo *MRI,
             const TargetRegisterInfo *TRI) const;
