@@ -1595,6 +1595,7 @@ void SplitEditor::finish(SmallVectorImpl<unsigned> *LRMap) {
   Edit->calculateRegClassAndHint(VRM.getMachineFunction(), VRAI);
 
   assert(!LRMap || LRMap->size() == Edit->size());
+  LIS.dump();
 }
 
 //===----------------------------------------------------------------------===//
