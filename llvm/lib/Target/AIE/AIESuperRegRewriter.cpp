@@ -67,6 +67,7 @@ public:
 };
 
 bool AIESuperRegRewriter::runOnMachineFunction(MachineFunction &MF) {
+  MF.verify(this, "SuperRegRewriter", &dbgs());
   LLVM_DEBUG(llvm::dbgs() << "*** Splitting super-registers: " << MF.getName()
                           << " ***\n");
 

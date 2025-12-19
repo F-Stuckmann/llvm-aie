@@ -4,6 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Modifications (c) Copyright 2025 Advanced Micro Devices, Inc. or its
+// affiliates
+//
 //===----------------------------------------------------------------------===//
 //
 // This file contains the SplitAnalysis class as well as mutator functions for
@@ -29,6 +32,7 @@
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/LaneBitmask.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/BlockFrequency.h"
 #include "llvm/Support/Debug.h"
@@ -571,10 +575,19 @@ SlotIndex SplitEditor::buildCopy(Register FromReg, Register ToReg,
   if (!TRI.getCoveringSubRegIndexes(RC, LaneMask, SubIndexes))
     report_fatal_error("Impossible to implement partial COPY");
 
+  dbgs() << "buildCopy() " << printReg(FromReg) << " to " << printReg(ToReg)
+         << " with LaneMask " << LaneMask << "\n";
   SlotIndex Def;
   for (unsigned BestIdx : SubIndexes) {
+    if ((TRI.getSubRegIndexLaneMask(BestIdx) & LaneMask).none()) {
+      dbgs() << "Skipping Lane " << TRI.getSubRegIndexLaneMask(BestIdx) << "\n";
+      continue;
+    }
+
     Def = buildSingleSubRegCopy(FromReg, ToReg, MBB, InsertBefore, BestIdx,
                                 DestLI, Late, Def, Desc);
+    dbgs() << "Alive SubReg " << printReg(ToReg, &TRI, BestIdx) << " on Lane "
+           << (TRI.getSubRegIndexLaneMask(BestIdx) & LaneMask) << "\n";
   }
 
   BumpPtrAllocator &Allocator = LIS.getVNInfoAllocator();
@@ -602,6 +615,7 @@ VNInfo *SplitEditor::defFromParent(unsigned RegIdx, const VNInfo *ParentVNI,
   Register Original = VRM.getOriginal(Edit->get(RegIdx));
   LiveInterval &OrigLI = LIS.getInterval(Original);
   VNInfo *OrigVNI = OrigLI.getVNInfoAt(UseIdx);
+  dbgs() << "DefFromParent: " << UseIdx << "\n";
 
   Register Reg = LI->reg();
   bool DidRemat = false;
@@ -619,11 +633,14 @@ VNInfo *SplitEditor::defFromParent(unsigned RegIdx, const VNInfo *ParentVNI,
     if (OrigLI.hasSubRanges()) {
       LaneMask = LaneBitmask::getNone();
       for (LiveInterval::SubRange &S : OrigLI.subranges()) {
-        if (S.liveAt(UseIdx))
+        if (S.liveAt(UseIdx)) {
+          dbgs() << "LaneMask Alive at " << S.LaneMask << "\n";
           LaneMask |= S.LaneMask;
+        }
       }
     } else {
       LaneMask = LaneBitmask::getAll();
+      dbgs() << "All Lanemasks are Alive bc no SubRanges could be extracted\n";
     }
 
     if (LaneMask.none()) {

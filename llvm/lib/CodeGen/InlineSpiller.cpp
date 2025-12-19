@@ -1207,6 +1207,7 @@ void InlineSpiller::spillAll() {
   eliminateDeadDefs();
   deleteSnippetCopies();
   deleteSpilledVirtualRegs();
+  LLVM_DEBUG(LIS.dump());
 }
 
 void InlineSpiller::spill(LiveRangeEdit &edit) {
