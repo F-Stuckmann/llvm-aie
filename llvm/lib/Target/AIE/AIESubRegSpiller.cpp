@@ -764,10 +764,6 @@ void SpillInfo::mergeStackIntervals(LiveIntervals &LIS, LiveStacks &LSS) {
       continue;
     }
 
-    // Create the value number for this stack interval.
-    VNInfo *VNI =
-        Info.StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
-
     // Stack slot is live from earliest access to latest access.
     // This covers spill-reload-spill patterns (e.g., in loops) where a spill
     // may occur after the last reload. Example:
@@ -788,8 +784,44 @@ void SpillInfo::mergeStackIntervals(LiveIntervals &LIS, LiveStacks &LSS) {
 
     // Ensure valid range (Start < End). If the last reload happens before
     // the first spill (unusual but possible with tied operands), skip.
-    if (Start < End)
-      Info.StackInt->addSegment(LiveInterval::Segment(Start, End, VNI));
+    if (Start >= End)
+      continue;
+
+    // Check if this stack interval already has segments (reusing stack slot)
+    VNInfo *VNI = nullptr;
+    if (!Info.StackInt->empty()) {
+      // Try to find an existing segment that overlaps or is adjacent to the
+      // new range. If found, reuse its VNInfo to properly extend the interval.
+      for (const LiveInterval::Segment &Seg : Info.StackInt->segments) {
+        // Check if segments overlap or are adjacent (within one slot)
+        // Segments are half-open [start, end), so adjacent means:
+        // - New range starts before/at existing end, or
+        // - New range ends after/at existing start
+        if (Start <= Seg.end && End >= Seg.start) {
+          VNI = Seg.valno;
+          LLVM_DEBUG(dbgs() << "  Reusing VNInfo from existing segment ["
+                            << Seg.start << ", " << Seg.end << ") for range ["
+                            << Start << ", " << End << ")\n");
+          break;
+        }
+      }
+
+      // If no overlapping segment found, create a new VNInfo
+      // addSegment will still merge if segments end up overlapping
+      if (!VNI) {
+        VNI =
+            Info.StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
+        LLVM_DEBUG(dbgs() << "  Creating new VNInfo for range [" << Start
+                          << ", " << End << ")\n");
+      }
+    } else {
+      // Empty interval - create the first VNInfo
+      VNI = Info.StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
+    }
+
+    // Add the segment. addSegment will automatically merge with overlapping
+    // segments, extending the interval as needed.
+    Info.StackInt->addSegment(LiveInterval::Segment(Start, End, VNI));
 
     LLVM_DEBUG(dbgs() << "Stack int [" << Start << ", " << End
                       << "): " << *Info.StackInt << '\n');
