@@ -1,0 +1,22 @@
+Debug messages should start with the main message for searchability and then followed by the variable components.
+
+Do not violate abstraction layers. Try to maintain an abstraction layer when implementing code.
+
+search through the code base for methods to reuse before implementing methods from scratch.
+
+When using temporary variables and they are read only, use const.
+
+if conditions with multiple sub conditions should be written as a const variable and the if can then use the newly created variable
+
+before finishing a request run llvm-lit. For refactor commits, nothing should change. Nofity user of failing unittests.
+Get Unittests from comits otherwise use llvm-lit Ilvm/test/CodeGen/AlE/
+
+Compile backends with ninja -C build lic
+General compiles are ninja -C build
+Make sure that there are no compilation errors when modifying changes
+
+In debug mode always check if the build compiles before executing the script to verify the hypotheses.
+
+In debug mode do not worry about deleting the old log files, I will take care of deleting them.
+
+When providing Code snippets from the Codebase, always provide a link for me to jump to that specific position in the codebase.

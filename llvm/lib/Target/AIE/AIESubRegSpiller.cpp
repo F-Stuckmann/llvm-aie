@@ -107,6 +107,7 @@ void SubregSpiller::VirtRegInfoAndOps::dump(
 }
 
 void AIESubRegSpiller::spillAll() {
+  LLVM_DEBUG(dbgs() << "Before SpillAll\n"; LIS.dump(); VRM.dump());
   // Skip if this register was already spilled (has a stack slot assigned).
   // We check Edit->getReg() (not Original) because:
   // - The base collectRegsToSpill() only collects "snippet" siblings (simple
@@ -265,11 +266,10 @@ void SpillInfo::updateDefSubRegs(ArrayRef<Register> RegsToSpill,
 
         // Create a new SubRegSpillInfo for this unique subreg index
         LLVM_DEBUG(dbgs() << "Adding SubRegSpillInfo for subreg index: "
-        << SubRegIdx << '\n');
+                          << SubRegIdx << '\n');
         SubRegSpillInfos.emplace_back(SubRegIdx);
-        
-        SeenSubRegIndices.insert(SubRegIdx);
 
+        SeenSubRegIndices.insert(SubRegIdx);
       }
     }
   }
