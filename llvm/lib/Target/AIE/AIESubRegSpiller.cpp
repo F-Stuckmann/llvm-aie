@@ -219,7 +219,9 @@ void AIESubRegSpiller::collectDeadDefs() {
 
 SpillInfo AIESubRegSpiller::collectSpillInfo() const {
   LLVM_DEBUG(dbgs() << "[SubRegSpiller] Collecting Spill info for "
-                    << RegsToSpill.size() << " regs\n");
+                    << printReg(Edit->getReg())
+                    << " Orig: " << printReg(VRM.getOriginal(Edit->getReg()))
+                    << " # Regs " << RegsToSpill.size() << "\n");
 
   // todo: is Edit->getReg() the same as the first RegsToSpill?
   SpillInfo SI(Original);
@@ -281,12 +283,16 @@ void SpillInfo::calcStack(MachineRegisterInfo &MRI,
 
   for (auto &Info : SubRegSpillInfos) {
 
+    auto ExistingStackSlot = VRM.getStackSlot(OrigReg);
+
     // Create new slot
     const TargetRegisterClass *RC = MRI.getRegClass(OrigReg);
     if (Info.SubRegIdx)
       RC = TRI.getSubRegisterClass(RC, Info.SubRegIdx);
 
-    Info.StackSlot = VRM.createSpillSlot(RC);
+    Info.StackSlot = ExistingStackSlot != VirtRegMap::NO_STACK_SLOT
+                         ? ExistingStackSlot
+                         : VRM.createSpillSlot(RC);
 
     // Create the stack interval for StackSlotColoring. The value number is
     // added later by mergeStackIntervals() only if there are segments to merge.
@@ -346,12 +352,10 @@ void SpillInfo::update(const Register Reg, MachineRegisterInfo &MRI) {
     };
 
     if (RegInfo.Writes && !HasDeadDef(Ops)) {
-      LLVM_DEBUG(dbgs() << "Adding spill location: " << MI);
       SpillLocations.push_back(Entry);
     }
 
     if (RegInfo.Reads) {
-      LLVM_DEBUG(dbgs() << "Adding reload location: " << MI);
       ReloadLocations.push_back(Entry);
     }
   }
