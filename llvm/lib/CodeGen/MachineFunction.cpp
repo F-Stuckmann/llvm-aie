@@ -31,6 +31,7 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MIRVirtRegMap.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/PseudoSourceValueManager.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
@@ -319,6 +320,13 @@ getOrCreateJumpTableInfo(unsigned EntryKind) {
   JumpTableInfo = new (Allocator)
     MachineJumpTableInfo((MachineJumpTableInfo::JTEntryKind)EntryKind);
   return JumpTableInfo;
+}
+
+/// Get or create MIR-loaded register assignments
+MIRVirtRegMapInfo &MachineFunction::getOrCreateMIRVirtRegMapInfo() {
+  if (!MIRVRegMapInfo)
+    MIRVRegMapInfo = std::make_unique<MIRVirtRegMapInfo>();
+  return *MIRVRegMapInfo;
 }
 
 DenormalMode MachineFunction::getDenormalMode(const fltSemantics &FPType) const {

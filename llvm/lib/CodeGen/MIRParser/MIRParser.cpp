@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MIRVirtRegMap.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/BasicBlock.h"
@@ -778,6 +779,38 @@ bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
 
     if (VReg.StackSlot.has_value()) {
       Info.StackSlot = *VReg.StackSlot;
+    }
+  }
+
+  // Populate MachineFunction with MIR-loaded register assignments
+  // Check if any registers have assignments
+  bool HasAssignments = false;
+  for (const auto &VReg : YamlMF.VirtualRegisters) {
+    if (!VReg.AssignedRegister.Value.empty() || VReg.StackSlot.has_value()) {
+      HasAssignments = true;
+      break;
+    }
+  }
+
+  // Create storage in MachineFunction if assignments exist
+  if (HasAssignments) {
+    MIRVirtRegMapInfo *MIRInfo = &MF.getOrCreateMIRVirtRegMapInfo();
+
+    // Store assignments for each register
+    for (const auto &VReg : YamlMF.VirtualRegisters) {
+      VRegInfo &Info = PFS.getVRegInfo(VReg.ID.Value);
+
+      // Early exit if no assignment for this register
+      if (VReg.AssignedRegister.Value.empty() && !VReg.StackSlot.has_value())
+        continue;
+
+      // Store assigned physical register
+      if (!VReg.AssignedRegister.Value.empty())
+        MIRInfo->setPhysReg(Info.VReg, Info.AssignedReg);
+
+      // Store stack slot
+      if (VReg.StackSlot.has_value())
+        MIRInfo->setStackSlot(Info.VReg, Info.StackSlot);
     }
   }
 

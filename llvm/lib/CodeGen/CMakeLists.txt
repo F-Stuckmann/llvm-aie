@@ -195,6 +195,7 @@ add_llvm_component_library(LLVMCodeGen
   RemoveRedundantDebugValues.cpp
   RenameIndependentSubregs.cpp
   MachineStableHash.cpp
+  MIRVirtRegMap.cpp
   MIRVRegNamerUtils.cpp
   MIRNamerPass.cpp
   MIRCanonicalizerPass.cpp

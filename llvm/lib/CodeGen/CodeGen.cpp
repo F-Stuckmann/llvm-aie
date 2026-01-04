@@ -71,6 +71,7 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeMIRCanonicalizerPass(Registry);
   initializeMIRNamerPass(Registry);
   initializeMIRProfileLoaderPassPass(Registry);
+  initializeMIRVirtRegMapWrapperLegacyPass(Registry);
   initializeMachineBlockFrequencyInfoWrapperPassPass(Registry);
   initializeMachineBlockPlacementPass(Registry);
   initializeMachineBlockPlacementStatsPass(Registry);

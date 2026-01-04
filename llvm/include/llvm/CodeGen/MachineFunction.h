@@ -73,6 +73,7 @@ class TargetRegisterClass;
 class TargetSubtargetInfo;
 struct WasmEHFuncInfo;
 struct WinEHFuncInfo;
+class MIRVirtRegMapInfo;
 
 template <> struct ilist_alloc_traits<MachineBasicBlock> {
   void deleteNode(MachineBasicBlock *MBB);
@@ -297,6 +298,9 @@ class LLVM_ABI MachineFunction {
   // Keeps track of Windows exception handling related data. This will be null
   // for functions that aren't using a funclet-based EH personality.
   WinEHFuncInfo *WinEHInfo = nullptr;
+
+  // MIR-loaded register assignments (populated during MIR parsing, may be null)
+  std::unique_ptr<MIRVirtRegMapInfo> MIRVRegMapInfo;
 
   // Function-level unique numbering for MachineBasicBlocks.  When a
   // MachineBasicBlock is inserted into a MachineFunction is it automatically
@@ -776,6 +780,18 @@ public:
   /// funclets for exception handling.
   const WinEHFuncInfo *getWinEHFuncInfo() const { return WinEHInfo; }
   WinEHFuncInfo *getWinEHFuncInfo() { return WinEHInfo; }
+
+  /// Get MIR-loaded register assignments (may return nullptr)
+  MIRVirtRegMapInfo *getMIRVirtRegMapInfo() {
+    return MIRVRegMapInfo.get();
+  }
+
+  const MIRVirtRegMapInfo *getMIRVirtRegMapInfo() const {
+    return MIRVRegMapInfo.get();
+  }
+
+  /// Get or create MIR-loaded register assignments
+  MIRVirtRegMapInfo &getOrCreateMIRVirtRegMapInfo();
 
   /// getAlignment - Return the alignment of the function.
   Align getAlignment() const { return Alignment; }

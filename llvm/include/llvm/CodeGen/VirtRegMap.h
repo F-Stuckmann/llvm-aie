@@ -239,10 +239,8 @@ public:
   VirtRegMap &getVRM() { return VRM; }
   const VirtRegMap &getVRM() const { return VRM; }
 
-  bool runOnMachineFunction(MachineFunction &MF) override {
-    VRM.init(MF);
-    return false;
-  }
+  bool runOnMachineFunction(MachineFunction &MF) override;
+
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
