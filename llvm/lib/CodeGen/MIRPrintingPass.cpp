@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/Function.h"
 #include "llvm/InitializePasses.h"
 
@@ -32,7 +33,9 @@ PreservedAnalyses PrintMIRPass::run(MachineFunction &MF,
   const MachineModuleInfo &MMI =
       MAMP.getCachedResult<MachineModuleAnalysis>(*M)->getMMI();
 
-  printMIR(OS, MMI, MF);
+  // VirtRegMap not available in new pass manager yet
+  // TODO: Add VirtRegMapAnalysis support when available
+  printMIR(OS, MMI, MF, nullptr);
   return PreservedAnalyses::all();
 }
 
@@ -52,6 +55,7 @@ struct MIRPrintingPass : public MachineFunctionPass {
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
+    AU.addUsedIfAvailable<VirtRegMapWrapperLegacy>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
@@ -62,7 +66,12 @@ struct MIRPrintingPass : public MachineFunctionPass {
     const MachineModuleInfo &MMI =
         getAnalysis<MachineModuleInfoWrapperPass>().getMMI();
 
-    printMIR(StrOS, MMI, MF);
+    // Query VirtRegMap if available
+    const VirtRegMap *VRM = nullptr;
+    if (auto *VRMWrapper = getAnalysisIfAvailable<VirtRegMapWrapperLegacy>())
+      VRM = &VRMWrapper->getVRM();
+
+    printMIR(StrOS, MMI, MF, VRM);
     MachineFunctions.append(Str);
     return false;
   }

@@ -23,6 +23,7 @@ class MachineBasicBlock;
 class MachineFunction;
 class MachineModuleInfo;
 class Module;
+class VirtRegMap;
 template <typename T> class SmallVectorImpl;
 
 class PrintMIRPreparePass : public PassInfoMixin<PrintMIRPreparePass> {
@@ -50,7 +51,7 @@ void printMIR(raw_ostream &OS, const Module &M);
 /// Print a machine function using the MIR serialization format to the given
 /// output stream.
 void printMIR(raw_ostream &OS, const MachineModuleInfo &MMI,
-              const MachineFunction &MF);
+              const MachineFunction &MF, const VirtRegMap *VRM = nullptr);
 
 /// Determine a possible list of successors of a basic block based on the
 /// basic block machine operand being used inside the block. This should give

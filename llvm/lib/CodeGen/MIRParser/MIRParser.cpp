@@ -25,6 +25,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -651,6 +652,38 @@ MIRParserImpl::initializeMachineFunction(const yaml::MachineFunction &YamlMF,
   MachineRegisterInfo &MRI = MF.getRegInfo();
   MRI.freezeReservedRegs();
 
+  // Populate VirtRegMap from parsed assigned-register and stack-slot fields
+  // This must happen after freezeReservedRegs() since VirtRegMap operations
+  // require reserved registers to be frozen.
+  bool HasVirtRegMapAssignments = false;
+  for (auto &Pair : PFS.VRegInfos) {
+    const VRegInfo *Info = Pair.second;
+    if (Info->AssignedReg.isValid() || Info->StackSlot >= 0) {
+      HasVirtRegMapAssignments = true;
+      break;
+    }
+  }
+
+  if (HasVirtRegMapAssignments) {
+    // Create VirtRegMap and populate it
+    VirtRegMap *VRM = new VirtRegMap();
+    VRM->init(MF);
+
+    for (auto &Pair : PFS.VRegInfos) {
+      const VRegInfo *Info = Pair.second;
+      Register VReg = Info->VReg;
+
+      if (Info->AssignedReg.isValid()) {
+        VRM->assignVirt2Phys(VReg, Info->AssignedReg);
+      } else if (Info->StackSlot >= 0) {
+        VRM->assignVirt2StackSlot(VReg, Info->StackSlot);
+      }
+    }
+
+    // Store VRM in MachineModuleInfo for use by subsequent passes
+    // Note: VirtRegMapWrapperLegacy will be responsible for managing the lifetime
+  }
+
   if (computeFunctionProperties(MF, YamlMF))
     return true;
 
@@ -677,6 +710,14 @@ bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
     RegInfo.invalidateLiveness();
 
   SMDiagnostic Error;
+
+  // TODO: VirtRegMap population from MIR
+  // The assigned-register and stack-slot fields are parsed and stored in the
+  // MIR, but populating VirtRegMap during parsing requires reserved registers
+  // to be frozen, which happens later. For now, we just validate the fields
+  // can be parsed. VirtRegMap population should be done by a separate pass
+  // after the machine function is fully initialized.
+
   // Parse the virtual register information.
   for (const auto &VReg : YamlMF.VirtualRegisters) {
     VRegInfo &Info = PFS.getVRegInfo(VReg.ID.Value);
@@ -725,6 +766,19 @@ bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
       Info.Flags |= FlagValue;
     }
     RegInfo.noteNewVirtualRegister(Info.VReg);
+
+    // Parse assigned-register and stack-slot fields if present
+    if (!VReg.AssignedRegister.Value.empty()) {
+      Register PhysReg;
+      if (parseNamedRegisterReference(PFS, PhysReg,
+                                     VReg.AssignedRegister.Value, Error))
+        return error(Error, VReg.AssignedRegister.SourceRange);
+      Info.AssignedReg = PhysReg;
+    }
+
+    if (VReg.StackSlot.has_value()) {
+      Info.StackSlot = *VReg.StackSlot;
+    }
   }
 
   // Parse the liveins.
