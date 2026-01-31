@@ -29,7 +29,7 @@ jobs:
       build_target: check-all
       projects: clang
       cache-key: amd-upstream
-      extra_cmake_args: '-DLLVM_USE_LINKER=gold -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64;AMDGPU" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=""'
+      extra_cmake_args: '-DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64;AMDGPU" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=""'
       os_list: ${{ github.ref_name == 'aie-public' && '["ubuntu-22.04", "windows-2022"]' || '["ubuntu-22.04"]' }}
 
   check_lld:
@@ -40,6 +40,6 @@ jobs:
       build_target: check-lld
       projects: lld
       cache-key: amd-upstream
-      extra_cmake_args: '-DLLVM_USE_LINKER=gold -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64;AMDGPU" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=""'
+      extra_cmake_args: '-DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64;AMDGPU" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=""'
       os_list: ${{ github.ref_name == 'aie-public' && '["ubuntu-22.04", "windows-2022"]' || '["ubuntu-22.04"]' }}
 
