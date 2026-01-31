@@ -132,7 +132,7 @@ jobs:
             builddir="/mnt/build/"
             sudo mkdir -p $builddir
             sudo chown gha $builddir
-            extra_cmake_args="-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang"
+            extra_cmake_args="-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DLLVM_USE_LINKER=gold"
           else
             builddir="$(pwd)"/build
           fi
