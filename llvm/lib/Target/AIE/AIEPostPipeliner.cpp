@@ -34,10 +34,10 @@
 namespace llvm::AIE {
 using namespace Solver;
 
-static cl::opt<int>
-    Heuristic("aie-postpipeliner-heuristic",
-              cl::desc("Select one specific post-pipeliner heuristic"),
-              cl::init(-1), cl::Hidden);
+static cl::opt<int> Heuristic(
+    "aie-postpipeliner-heuristic",
+    cl::desc("Select one specific post-pipeliner heuristic mini change"),
+    cl::init(-1), cl::Hidden);
 static cl::opt<int>
     HeuristicRuns("aie-postpipeliner-heuristic-runs",
                   cl::desc("Number of runs for heuristics that converge"),
