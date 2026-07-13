@@ -87,6 +87,18 @@ static cl::opt<bool> PostSchedIgnoreMemoryDeps(
     "aie-safe-to-ignore-memory-deps", cl::init(false),
     cl::desc("Ignore memory deps when we know that it is safe."));
 
+static cl::opt<bool> MoveBotFixedToPreds(
+    "aie-olp-move-bot-fixed", cl::init(false),
+    cl::desc("[AIE] In the steady state of an outer-loop-pipelined loop, "
+             "relocate the leading cycles of a post-pipelined inner loop's "
+             "bottom-fixed prologue out of the loop header into the header's "
+             "predecessors (outer latch + warm-up)."));
+static cl::opt<unsigned> MoveBotFixedCount(
+    "aie-olp-move-bot-fixed-count", cl::init(6),
+    cl::desc(
+        "[AIE] Number of leading bottom-fixed prologue bundles to relocate "
+        "into predecessors when aie-olp-move-bot-fixed is enabled."));
+
 namespace llvm::AIE {
 
 void dumpInterBlock(const InterBlockEdges &Edges) {
@@ -1342,8 +1354,10 @@ void InterBlockScheduling::emitInterBlockBottom(const BlockState &BS) const {
     return;
   }
   MachineBasicBlock *PreHeader = BS.TheBlock;
-  assert(PreHeader->end() == PreHeader->getFirstTerminator() &&
-         "PreHeader is not fall-through");
+  // Insert before the first terminator: for a fall-through block this is
+  // equivalent to PreHeader->end(); for a block ending in a branch (e.g. a
+  // latch with a conditional jump), this emits the band ahead of it instead.
+  MachineBasicBlock::iterator InsertPt = PreHeader->getFirstTerminator();
   // BottomInsertSemanticOrder instructions may have been temporarily placed in
   // the block by buildPerSuccEdges to enable dependency analysis. Remove them
   // before emitBundles re-inserts all BottomInsert instructions properly.
@@ -1354,7 +1368,7 @@ void InterBlockScheduling::emitInterBlockBottom(const BlockState &BS) const {
   // FixPoint reserves bot-fixed instrs standalone (NOP bundles dropped, cycles
   // re-encoded as DAG latencies), mirroring the top band; legacy emits bundled.
   const bool ApplyBundling = !isFixPointScheduling();
-  emitBundles(BS.BottomInsert, PreHeader, PreHeader->end(), /*Move=*/false,
+  emitBundles(BS.BottomInsert, PreHeader, InsertPt, /*Move=*/false,
               /*EmitNops=*/false, ApplyBundling);
 }
 
