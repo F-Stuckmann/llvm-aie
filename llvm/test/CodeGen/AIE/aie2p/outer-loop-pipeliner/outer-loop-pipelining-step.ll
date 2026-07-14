@@ -35,27 +35,27 @@
 
 ; Warm-up block: data load only, no outer hardware-loop setup.
 ; Absence of @llvm.start.loop.iterations here confirms no JNZD conversion.
-; CHECK: steady.preheader:
-; CHECK:   %v0.steady.peel = load i32
+; CHECK: stage0.top:
+; CHECK:   %v0.steady.top = load i32
 ; CHECK-NOT: @llvm.start.loop.iterations
-; CHECK:   br label %steady.header
+; CHECK:   br label %steady.stage1.top
 
-; Steady-state header: pipelined load PHI, standard inner-loop set.loop.iterations.
+; Outer header: pipelined load PHI, standard inner-loop set.loop.iterations.
 ; No @llvm.start.loop.iterations for outer (outer loop is NOT a JNZD hw loop).
-; CHECK: steady.header:
-; CHECK:   %v0.steady.phi = phi i32 [ %v0.steady.peel, %steady.preheader ], [ %v0.steady.epi, %steady.latch ]
+; CHECK: steady.stage1.top:
+; CHECK:   %v0.steady.phi = phi i32 [ %v0.steady.top, %stage0.top ], [ %v0.steady.bottom, %steady.stage1.bottom.and.stage0.top ]
 ; CHECK:   call void @llvm.set.loop.iterations.i32(i32 %M)
-; CHECK:   br label %steady.inner.header
+; CHECK:   br label %steady.stage1.inner.inner.header
 
-; Steady-state latch: step-2 counter + adjusted limit, then epilogue load.
+; Outer latch: step-2 counter + adjusted limit, then epilogue load.
 ; The limit is adjusted to 2 (constant folded: 0 - (-2) = 2), not 1.
 ; No @llvm.loop.decrement.reg — outer loop kept as software icmp (step != -1).
-; CHECK: steady.latch:
+; CHECK: steady.stage1.bottom.and.stage0.top:
 ; CHECK:   store i32
 ; CHECK:   %iv.next.steady = add i32 %iv.steady, -2
 ; CHECK:   %outer.cond.steady = icmp eq i32 %iv.next.steady, 2
-; CHECK:   %v0.steady.epi = load i32
-; CHECK-NEXT:   br i1 %outer.cond.steady, label %lastiter.prologue, label %steady.header
+; CHECK:   %v0.steady.bottom = load i32
+; CHECK-NEXT:   br i1 %outer.cond.steady, label %lastiter.stage1.top, label %steady.stage1.top
 
 define void @decrement_step2(ptr noalias %a, ptr noalias %c, i32 %N, i32 %M) {
 entry:
@@ -105,32 +105,32 @@ declare i1 @llvm.loop.decrement.i32(i32)
 ; Test 2: Decrement outer loop with step -1 (regression guard).
 ;
 ; With step -1, the outer loop is both pipelined AND converted to a JNZD
-; hardware loop. @llvm.start.loop.iterations appears in the warm-up block
+; hardware loop. @llvm.start.loop.iterations appears in the stage-0 top block
 ; and @llvm.loop.decrement.reg replaces the software icmp in the latch.
 ; ============================================================================
 
 ; CHECK-LABEL: define void @decrement_step1
 
 ; Warm-up block: data load + outer JNZD hardware-loop setup (step -1 only).
-; CHECK: steady.preheader:
-; CHECK:   %v0.steady.peel = load i32
+; CHECK: stage0.top:
+; CHECK:   %v0.steady.top = load i32
 ; CHECK:   %outer.jnzd.tc = sub i32 %N, 1
 ; CHECK:   %outer.ctr.init = call i32 @llvm.start.loop.iterations.i32(i32 %outer.jnzd.tc)
-; CHECK:   br label %steady.header
+; CHECK:   br label %steady.stage1.top
 
-; Steady-state header: hardware-loop counter PHI for the outer JNZD loop.
-; CHECK: steady.header:
-; CHECK:   %v0.steady.phi = phi i32 [ %v0.steady.peel, %steady.preheader ], [ %v0.steady.epi, %steady.latch ]
-; CHECK:   %outer.ctr = phi i32 [ %outer.ctr.init, %steady.preheader ]
+; Outer header: hardware-loop counter PHI for the outer JNZD loop.
+; CHECK: steady.stage1.top:
+; CHECK:   %v0.steady.phi = phi i32 [ %v0.steady.top, %stage0.top ], [ %v0.steady.bottom, %steady.stage1.bottom.and.stage0.top ]
+; CHECK:   %outer.ctr = phi i32 [ %outer.ctr.init, %stage0.top ]
 ; CHECK:   call void @llvm.set.loop.iterations.i32(i32 %M)
 
-; Steady-state latch: @llvm.loop.decrement.reg replaces the software %iv.next/%outer.cond.
-; CHECK: steady.latch:
+; Outer latch: @llvm.loop.decrement.reg replaces the software %iv.next/%outer.cond.
+; CHECK: steady.stage1.bottom.and.stage0.top:
 ; CHECK:   store i32
-; CHECK:   %v0.steady.epi = load i32
+; CHECK:   %v0.steady.bottom = load i32
 ; CHECK:   %outer.ctr.next = call i32 @llvm.loop.decrement.reg.i32
 ; CHECK:   %outer.loop.cond = icmp ne i32 %outer.ctr.next, 0
-; CHECK:   br i1 %outer.loop.cond, label %steady.header, label %lastiter.prologue
+; CHECK:   br i1 %outer.loop.cond, label %steady.stage1.top, label %lastiter.stage1.top
 
 define void @decrement_step1(ptr noalias %a, ptr noalias %c, i32 %N, i32 %M) {
 entry:

@@ -36,21 +36,21 @@
 ;   !{!"llvm.loop.hint.aie-enable-outer-loop-pipelining", i64 1}
 ;
 ; Expected: the pass pipelines the loop even without the global flag.
-; The warm-up block (steady.preheader) must be present.
+; The stage-0 top block (stage0.top) must be present.
 ; ============================================================================
 
 ; CHECK-LABEL: define void @metadata_opt_in
 
 ; Warm-up block must be created (metadata opt-in triggered pipelining).
-; CHECK: steady.preheader:
-; CHECK:   %v0.steady.peel = load i32, ptr %a, align 4
-; CHECK:   %v1.steady.peel = load i32, ptr %b, align 4
-; CHECK:   br label %steady.header
+; CHECK: stage0.top:
+; CHECK:   %v0.steady.top = load i32, ptr %a, align 4
+; CHECK:   %v1.steady.top = load i32, ptr %b, align 4
+; CHECK:   br label %steady.stage1.top
 
-; Steady-state header must have pipelined PHIs.
-; CHECK: steady.header:
-; CHECK:   %v0.steady.phi = phi i32 [ %v0.steady.peel, %steady.preheader ], [ %v0.steady.epi, %steady.latch ]
-; CHECK:   %v1.steady.phi = phi i32 [ %v1.steady.peel, %steady.preheader ], [ %v1.steady.epi, %steady.latch ]
+; Outer header must have pipelined PHIs.
+; CHECK: steady.stage1.top:
+; CHECK:   %v0.steady.phi = phi i32 [ %v0.steady.top, %stage0.top ], [ %v0.steady.bottom, %steady.stage1.bottom.and.stage0.top ]
+; CHECK:   %v1.steady.phi = phi i32 [ %v1.steady.top, %stage0.top ], [ %v1.steady.bottom, %steady.stage1.bottom.and.stage0.top ]
 
 define void @metadata_opt_in(ptr noalias %a, ptr noalias %b, ptr noalias %c,
                               i32 %N, i32 %M) {
@@ -106,14 +106,14 @@ declare i1 @llvm.loop.decrement.i32(i32)
 ;   !{!"llvm.loop.hint.aie-enable-outer-loop-pipelining", i64 0}
 ;
 ; Expected: the pass skips the loop (global flag is OFF, metadata says 0).
-; The warm-up block (steady.preheader) must NOT appear inside this
+; The stage-0 top block (stage0.top) must NOT appear inside this
 ; function (checked between the function label and the first outer.header).
 ; ============================================================================
 
 ; CHECK-LABEL: define void @metadata_opt_out
 
-; No warm-up block between the function entry and outer.header.
-; CHECK-NOT: steady.preheader
+; No stage-0 top/steady block between the function entry and outer.header.
+; CHECK-NOT: stage0.top
 ; The outer header must retain the original loads (no pipelined PHIs).
 ; CHECK: outer.header:
 ; CHECK:   %v0 = load i32, ptr %a.ptr, align 4
