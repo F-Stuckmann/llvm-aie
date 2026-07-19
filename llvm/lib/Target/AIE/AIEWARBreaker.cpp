@@ -318,6 +318,14 @@ class AIEWARBreaker : public MachineFunctionPass {
     int Cost;
   };
 
+  /// An accepted rename: the candidate, how to glue it back, and the physreg
+  /// its fresh vreg is pinned to. Produced by phase 2, consumed by phase 3.
+  struct RenameDecision {
+    const WARCandidate *Cand;
+    GlueCopyPlan Plan;
+    MCPhysReg RenamePhys;
+  };
+
   /// Picks a non-CSR physreg in \p RC free of \p BlockedUnits and free
   /// over [Start, End); NoRegister if none qualifies.
   MCPhysReg pickRenamePhysReg(const TargetRegisterClass &RC,
@@ -331,10 +339,15 @@ class AIEWARBreaker : public MachineFunctionPass {
                                        const GlueCopyPlan &Plan,
                                        SlotIndex MBBEnd) const;
 
-  /// Splits \p C's def-vreg into a fresh vreg pinned to \p RenamePhys,
+  /// DECIDE: candidate \p C's rename physreg + glue plan if it fits \p Budget
+  /// (debited on success); nullopt if rejected, unrenamable, or unaffordable.
+  std::optional<RenameDecision> decideRename(MachineBasicBlock &MBB,
+                                             const WARCandidate &C,
+                                             int &Budget) const;
+
+  /// REWRITE: split \p D's def-vreg into a fresh vreg pinned to its physreg,
   /// with glue COPYs restoring the original name before the terminator.
-  void splitAndRenameVReg(MachineBasicBlock &MBB, const WARCandidate &C,
-                          const GlueCopyPlan &Plan, MCPhysReg RenamePhys);
+  void applyRename(MachineBasicBlock &MBB, const RenameDecision &D);
 
   /// Rewrites \p C's touched defs to \p NewVReg and anchors the first
   /// partial-lane def as undef.
@@ -530,10 +543,36 @@ void AIEWARBreaker::splitDisconnectedComponents(Register VReg) {
   AIESuperRegUtils::splitDisconnectedComponents(VReg, *LIS, *VRM, Components);
 }
 
-void AIEWARBreaker::splitAndRenameVReg(MachineBasicBlock &MBB,
-                                       const WARCandidate &C,
-                                       const GlueCopyPlan &Plan,
-                                       MCPhysReg RenamePhys) {
+std::optional<AIEWARBreaker::RenameDecision>
+AIEWARBreaker::decideRename(MachineBasicBlock &MBB, const WARCandidate &C,
+                            int &Budget) const {
+  if (C.IsRejected) {
+    LLVM_DEBUG(dbgs() << "  rejected interrupted write chain for "
+                      << printReg(C.DefVReg, TRI) << "\n");
+    return std::nullopt;
+  }
+
+  const GlueCopyPlan Plan = planGlueCopies(*MRI, C);
+  const std::optional<RenamePlan> Rename =
+      planRename(MBB, C, Plan, LIS->getMBBEndIdx(&MBB));
+  if (!Rename) {
+    LLVM_DEBUG(dbgs() << "  cost gate: no rename target for "
+                      << printReg(C.DefVReg, TRI) << "\n");
+    return std::nullopt;
+  }
+  if (Rename->Cost > Budget) {
+    LLVM_DEBUG(dbgs() << "  cost gate: skipping " << printReg(C.DefVReg, TRI)
+                      << " (cost=" << Rename->Cost << " > budget=" << Budget
+                      << ")\n");
+    return std::nullopt;
+  }
+  Budget -= Rename->Cost;
+  return RenameDecision{&C, Plan, Rename->Phys};
+}
+
+void AIEWARBreaker::applyRename(MachineBasicBlock &MBB,
+                                const RenameDecision &D) {
+  const WARCandidate &C = *D.Cand;
   const Register OldVReg = C.DefVReg;
   assert(OldVReg.isVirtual() && VRM->hasPhys(OldVReg) &&
          "DefVReg must be a VRM-assigned virtual register");
@@ -545,49 +584,31 @@ void AIEWARBreaker::splitAndRenameVReg(MachineBasicBlock &MBB,
   rewriteTouchedDefs(C, NewVReg);
   renameOperandsAfter(MBB, C.TouchedDefOps.back()->getParent(), OldVReg,
                       NewVReg);
-  insertGlueCopies(MBB, GlueInsertPt, Plan, OldVReg, NewVReg);
+  insertGlueCopies(MBB, GlueInsertPt, D.Plan, OldVReg, NewVReg);
   refreshIntervals(OldVReg, NewVReg);
-  LRM->assign(LIS->getInterval(NewVReg), RenamePhys);
+  LRM->assign(LIS->getInterval(NewVReg), D.RenamePhys);
   LLVM_DEBUG(dbgs() << "  split " << printReg(OldVReg, TRI) << " -> "
                     << printReg(NewVReg, TRI) << " pinned to "
-                    << printReg(RenamePhys, TRI) << "\n");
+                    << printReg(D.RenamePhys, TRI) << "\n");
 }
 
 bool AIEWARBreaker::tryBreakWARsInMBB(MachineBasicBlock &MBB) {
   LLVM_DEBUG(dbgs() << "Try WAR break on " << MBB.getFullName() << "\n");
 
+  // Phase 1 -- DETECT: vreg defs that recycle a physreg still live from an
+  // earlier read in this block.
   WARScanner Scanner(MBB, *MRI, *TRI, *VRM);
   Scanner.scan();
 
-  // Resolve candidates against a shared fixed slack budget; each
-  // accepted split debits its glue-COPY cost from Budget.
+  // Phase 2 (DECIDE) and phase 3 (REWRITE) interleave per candidate: each
+  // rewrite moves VRM/LRM, which the next candidate's decision re-reads.
   bool Changed = false;
   int Budget = TII->getOuterLoopEpilogCopySlack();
-  const SlotIndex MBBEnd = LIS->getMBBEndIdx(&MBB);
-  for (const WARCandidate &C : Scanner.candidates()) {
-    if (C.IsRejected) {
-      LLVM_DEBUG(dbgs() << "  rejected interrupted write chain for "
-                        << printReg(C.DefVReg, TRI) << "\n");
-      continue;
+  for (const WARCandidate &C : Scanner.candidates())
+    if (std::optional<RenameDecision> D = decideRename(MBB, C, Budget)) {
+      applyRename(MBB, *D);
+      Changed = true;
     }
-
-    const GlueCopyPlan Plan = planGlueCopies(*MRI, C);
-    const std::optional<RenamePlan> Rename = planRename(MBB, C, Plan, MBBEnd);
-    if (!Rename) {
-      LLVM_DEBUG(dbgs() << "  cost gate: no rename target for "
-                        << printReg(C.DefVReg, TRI) << "\n");
-      continue;
-    }
-    if (Rename->Cost > Budget) {
-      LLVM_DEBUG(dbgs() << "  cost gate: skipping " << printReg(C.DefVReg, TRI)
-                        << " (cost=" << Rename->Cost << " > budget=" << Budget
-                        << ")\n");
-      continue;
-    }
-    splitAndRenameVReg(MBB, C, Plan, Rename->Phys);
-    Budget -= Rename->Cost;
-    Changed = true;
-  }
   return Changed;
 }
 
