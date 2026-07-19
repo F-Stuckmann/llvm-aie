@@ -323,11 +323,7 @@ splitAndAssignSubPhysRegs(SmallMapVector<int, Register, 8> &SubRegToVReg,
     // By giving an independent VReg to each lane, we might have created
     // multiple separate components. Give a VReg to each separate component.
     SmallVector<LiveInterval *, 4> LIComponents;
-    LIS.splitSeparateComponents(SubRegLI, LIComponents);
-    LIComponents.push_back(&SubRegLI);
-    // todo: there is a bug in splitSeparateComponents, so we have to manually
-    // grow the VRM (due to abstraction complexity on MRI::Delegate "protocol")
-    VRM.grow();
+    splitDisconnectedComponents(VReg, LIS, VRM, LIComponents);
 
     if (!AssignedPhysReg.has_value())
       continue;
@@ -439,6 +435,17 @@ void clearStaleSplitFromMappings(const SmallSet<Register, 8> &TaintedOriginals,
     // and SplitKit::defFromParent stops consulting the (stale) ancestor LI.
     VRM.clearSplitFromReg(V);
   }
+}
+
+void splitDisconnectedComponents(Register VReg, LiveIntervals &LIS,
+                                 VirtRegMap &VRM,
+                                 SmallVectorImpl<LiveInterval *> &Components) {
+  LiveInterval &LI = LIS.getInterval(VReg);
+  LIS.splitSeparateComponents(LI, Components);
+  Components.push_back(&LI);
+  // splitSeparateComponents already cloned the new vregs into MRI; one grow()
+  // resizes VRM to the current vreg count, covering every component at once.
+  VRM.grow();
 }
 
 void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,

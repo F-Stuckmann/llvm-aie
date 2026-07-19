@@ -526,10 +526,8 @@ void AIEWARBreaker::clearStaleDeadFlags(Register OldVReg,
 void AIEWARBreaker::splitDisconnectedComponents(Register VReg) {
   // OldVReg can split if the head's use killed it before the glue COPY
   // restarted it; NewVReg can split across disjoint use regions.
-  SmallVector<LiveInterval *, 2> SplitLIs;
-  LIS->splitSeparateComponents(LIS->getInterval(VReg), SplitLIs);
-  for (size_t I = 0, E = SplitLIs.size(); I != E; ++I)
-    VRM->grow();
+  SmallVector<LiveInterval *, 4> Components;
+  AIESuperRegUtils::splitDisconnectedComponents(VReg, *LIS, *VRM, Components);
 }
 
 void AIEWARBreaker::splitAndRenameVReg(MachineBasicBlock &MBB,

@@ -15,6 +15,7 @@
 #define LLVM_LIB_TARGET_AIE_AIESUPERREGUTILS_H
 
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include <optional>
 
 namespace llvm {
@@ -23,6 +24,7 @@ class MachineFunction;
 class MachineRegisterInfo;
 struct AIEBaseRegisterInfo;
 class MachineInstr;
+class LiveInterval;
 class LiveIntervals;
 class TargetInstrInfo;
 class TargetRegisterInfo;
@@ -84,6 +86,13 @@ bool isRegUsedBy2DOr3DInstruction(const MachineRegisterInfo &MRI,
 void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
                          VirtRegMap &VRM, LiveRegMatrix &LRM,
                          LiveIntervals &LIS);
+
+/// Splits \p VReg's interval into one vreg per disconnected component (as the
+/// verifier requires), growing VRM to cover them. \p Components collects the
+/// new intervals plus \p VReg's own; a single VRM.grow() covers all of them.
+void splitDisconnectedComponents(Register VReg, LiveIntervals &LIS,
+                                 VirtRegMap &VRM,
+                                 SmallVectorImpl<LiveInterval *> &Components);
 
 /// Sever VRM split-from chain for descendants of \p TaintedOriginals so that
 /// SplitKit::defFromParent consults the descendant's own (repaired) LI, not
