@@ -379,7 +379,8 @@ MCPhysReg AIEWARBreaker::pickRenamePhysReg(const TargetRegisterClass &RC,
                                            SlotIndex End) const {
   // getOrder is already free of reserved and non-allocatable registers.
   for (MCPhysReg P : RegClassInfo.getOrder(&RC)) {
-    if (RegClassInfo.getLastCalleeSavedAlias(P))
+    const bool IsCalleeSaved = RegClassInfo.getLastCalleeSavedAlias(P);
+    if (IsCalleeSaved)
       continue;
     if (!BlockedUnits.available(P))
       continue;
