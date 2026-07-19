@@ -88,8 +88,7 @@ void repairLiveIntervals(SmallSet<Register, 8> &RegistersToRepair,
                          LiveIntervals &LIS);
 
 /// Splits \p VReg's interval into one vreg per disconnected component (as the
-/// verifier requires), growing VRM to cover them. \p Components collects the
-/// new intervals plus \p VReg's own; a single VRM.grow() covers all of them.
+/// verifier requires), growing VRM; \p Components collects them plus \p VReg's.
 void splitDisconnectedComponents(Register VReg, LiveIntervals &LIS,
                                  VirtRegMap &VRM,
                                  SmallVectorImpl<LiveInterval *> &Components);
