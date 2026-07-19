@@ -567,7 +567,9 @@ void AIEWawRegRewriter::sortSWPAware(
 
     return ModuloCycle[IA] < ModuloCycle[IB];
   };
-  llvm::sort(Candidates, ModuloCycleLess);
+  // Stable: many candidates share a modulo cycle, and an unstable sort would
+  // order those ties differently per standard-library implementation.
+  llvm::stable_sort(Candidates, ModuloCycleLess);
 }
 
 bool AIEWawRegRewriter::renameMBBPhysRegs(const MachineBasicBlock *MBB) {
