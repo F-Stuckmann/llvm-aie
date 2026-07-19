@@ -15,12 +15,14 @@
 
 #include "AIE.h"
 #include "AIEBaseInstrInfo.h"
+#include "AIESuperRegUtils.h"
 #include "Utils/AIELoopUtils.h"
 #include "Utils/AIERegUnitUtils.h"
 
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/LiveDebugVariables.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -354,15 +356,11 @@ class AIEWARBreaker : public MachineFunctionPass {
                         Register NewVReg) const;
 
   /// Recompute live intervals for OldVReg and NewVReg after the split.
-  void refreshIntervals(Register OldVReg, Register NewVReg, MCPhysReg OldPhys);
+  void refreshIntervals(Register OldVReg, Register NewVReg);
 
   /// Clears stale `dead` flags so recomputed live ranges aren't
   /// truncated at defs that now feed the glue COPY.
   void clearStaleDeadFlags(Register OldVReg, Register NewVReg) const;
-
-  /// Re-derives OldVReg's live interval and LiveRegMatrix assignment
-  /// after glue COPYs extended its range past OldPhys's recorded union.
-  void reassignOldVRegInterval(Register OldVReg, MCPhysReg OldPhys);
 
   /// Peels any disconnected components of \p VReg's interval into
   /// fresh vregs grown into VRM (one per component, for the verifier).
@@ -512,10 +510,12 @@ void AIEWARBreaker::insertGlueCopies(MachineBasicBlock &MBB,
   }
 }
 
-void AIEWARBreaker::refreshIntervals(Register OldVReg, Register NewVReg,
-                                     MCPhysReg OldPhys) {
+void AIEWARBreaker::refreshIntervals(Register OldVReg, Register NewVReg) {
   clearStaleDeadFlags(OldVReg, NewVReg);
-  reassignOldVRegInterval(OldVReg, OldPhys);
+  // The glue COPYs extended OldVReg's range past its recorded physreg union.
+  SmallSet<Register, 8> ToRepair;
+  ToRepair.insert(OldVReg);
+  AIESuperRegUtils::repairLiveIntervals(ToRepair, *VRM, *LRM, *LIS);
   LIS->createAndComputeVirtRegInterval(NewVReg);
   splitDisconnectedComponents(OldVReg);
   splitDisconnectedComponents(NewVReg);
@@ -527,14 +527,6 @@ void AIEWARBreaker::clearStaleDeadFlags(Register OldVReg,
     Def.setIsDead(false);
   for (MachineOperand &Def : MRI->def_operands(NewVReg))
     Def.setIsDead(false);
-}
-
-void AIEWARBreaker::reassignOldVRegInterval(Register OldVReg,
-                                            MCPhysReg OldPhys) {
-  LRM->unassign(LIS->getInterval(OldVReg));
-  LIS->removeInterval(OldVReg);
-  LIS->createAndComputeVirtRegInterval(OldVReg);
-  LRM->assign(LIS->getInterval(OldVReg), OldPhys);
 }
 
 void AIEWARBreaker::splitDisconnectedComponents(Register VReg) {
@@ -553,7 +545,6 @@ void AIEWARBreaker::splitAndRenameVReg(MachineBasicBlock &MBB,
   const Register OldVReg = C.DefVReg;
   assert(OldVReg.isVirtual() && VRM->hasPhys(OldVReg) &&
          "DefVReg must be a VRM-assigned virtual register");
-  const MCPhysReg OrigPhys = VRM->getPhys(OldVReg);
   const TargetRegisterClass *RC = MRI->getRegClass(OldVReg);
   const MachineBasicBlock::iterator GlueInsertPt = MBB.getFirstTerminator();
 
@@ -563,7 +554,7 @@ void AIEWARBreaker::splitAndRenameVReg(MachineBasicBlock &MBB,
   renameOperandsAfter(MBB, C.TouchedDefOps.back()->getParent(), OldVReg,
                       NewVReg);
   insertGlueCopies(MBB, GlueInsertPt, Plan, OldVReg, NewVReg);
-  refreshIntervals(OldVReg, NewVReg, OrigPhys);
+  refreshIntervals(OldVReg, NewVReg);
   LRM->assign(LIS->getInterval(NewVReg), RenamePhys);
   LLVM_DEBUG(dbgs() << "  split " << printReg(OldVReg, TRI) << " -> "
                     << printReg(NewVReg, TRI) << " pinned to "
