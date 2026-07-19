@@ -19,6 +19,14 @@ void addRegUnits(const TargetRegisterInfo &TRI, MCRegister Phys,
     Out.set(RU);
 }
 
+bool overlapsRegUnits(const TargetRegisterInfo &TRI, MCRegister Phys,
+                      const BitVector &Units) {
+  for (MCRegUnit RU : TRI.regunits(Phys))
+    if (Units.test(RU))
+      return true;
+  return false;
+}
+
 BitVector computeCalleeSavedRegSet(const TargetRegisterInfo &TRI,
                                    const MachineRegisterInfo &MRI) {
   BitVector CSRRegs(TRI.getNumRegs());

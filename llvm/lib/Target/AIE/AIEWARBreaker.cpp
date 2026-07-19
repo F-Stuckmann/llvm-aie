@@ -184,7 +184,6 @@ class WARScanner {
   const VirtRegMap &VRM;
 
   BitVector BlockedUnits;
-  BitVector DefUnitsScratch;
   DenseSet<Register> UsedVRegs;
 
   SmallVector<WARCandidate, 4> Candidates;
@@ -200,8 +199,7 @@ public:
   WARScanner(MachineBasicBlock &MBB, const MachineRegisterInfo &MRI,
              const TargetRegisterInfo &TRI, const VirtRegMap &VRM)
       : MBB(MBB), MRI(MRI), TRI(TRI), VRM(VRM),
-        BlockedUnits(TRI.getNumRegUnits()),
-        DefUnitsScratch(TRI.getNumRegUnits()) {
+        BlockedUnits(TRI.getNumRegUnits()) {
     addLiveInUnits(MBB, TRI, BlockedUnits);
   }
 
@@ -235,9 +233,7 @@ void WARScanner::recordCandidateDef(MachineOperand &DefMO) {
   const MCRegister Phys = resolveOperandToPhys(DefMO, TRI, VRM);
   if (!Phys)
     return;
-  DefUnitsScratch.reset();
-  addRegUnits(TRI, Phys, DefUnitsScratch);
-  if (!DefUnitsScratch.anyCommon(BlockedUnits))
+  if (!AIERegUnitUtils::overlapsRegUnits(TRI, Phys, BlockedUnits))
     return;
   if (!UsedVRegs.contains(DefReg))
     return;
@@ -396,15 +392,12 @@ MCPhysReg AIEWARBreaker::pickRenamePhysReg(const TargetRegisterClass &RC,
                                            const BitVector &BlockedUnits,
                                            SlotIndex Start,
                                            SlotIndex End) const {
-  BitVector Scratch(TRI->getNumRegUnits());
   for (MCPhysReg P : RC.getRegisters()) {
     if (CSRRegs.test(P))
       continue;
     if (!MRI->isAllocatable(P))
       continue;
-    Scratch.reset();
-    addRegUnits(*TRI, P, Scratch);
-    if (Scratch.anyCommon(BlockedUnits))
+    if (AIERegUnitUtils::overlapsRegUnits(*TRI, P, BlockedUnits))
       continue;
     if (LRM->checkInterference(Start, End, P))
       continue;

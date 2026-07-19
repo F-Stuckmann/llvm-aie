@@ -29,6 +29,10 @@ namespace AIERegUnitUtils {
 void addRegUnits(const TargetRegisterInfo &TRI, MCRegister Phys,
                  BitVector &Out);
 
+/// Whether any reg-unit of \p Phys is set in \p Units, without allocating.
+bool overlapsRegUnits(const TargetRegisterInfo &TRI, MCRegister Phys,
+                      const BitVector &Units);
+
 /// Return a BitVector sized TRI.getNumRegs(), with every callee-saved
 /// register of MRI's calling convention set.
 BitVector computeCalleeSavedRegSet(const TargetRegisterInfo &TRI,

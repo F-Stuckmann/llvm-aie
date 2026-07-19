@@ -781,8 +781,7 @@ MCPhysReg AIEWawRegRewriter::getReplacementPhysReg(const Register VReg,
   /// Whether \p PhysReg was ever used for re-assigning a vreg
   auto WasUsedForReassignment = [TRI = this->TRI,
                                  &UsedUnits](MCPhysReg PhysReg) {
-    return any_of(TRI->regunits(PhysReg),
-                  [&UsedUnits](MCRegUnit RU) { return UsedUnits.test(RU); });
+    return AIERegUnitUtils::overlapsRegUnits(*TRI, PhysReg, UsedUnits);
   };
 
   LLVM_DEBUG(dbgs() << "     Try to re-assign" << printReg(VReg, TRI) << "\n");
@@ -820,8 +819,7 @@ MCPhysReg AIEWawRegRewriter::getReplacementPhysReg(const Register VReg,
       // Move it to the end of the list. We return, so don't have to
       // care about invalidation
       moveRegAndAliasesBack(PhysReg, LRURegisters, TRI);
-      for (MCRegUnit RU : TRI->regunits(PhysReg))
-        UsedUnits.set(RU);
+      AIERegUnitUtils::addRegUnits(*TRI, PhysReg, UsedUnits);
       return PhysReg;
     }
     LLVM_DEBUG(dbgs() << "       Cannot assign " << printReg(VReg, TRI)
