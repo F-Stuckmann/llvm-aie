@@ -17,9 +17,7 @@
 #include "AIEBaseInstrInfo.h"
 #include "AIESuperRegUtils.h"
 #include "Utils/AIELoopUtils.h"
-#include "Utils/AIERegUnitUtils.h"
 
-#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallSet.h"
@@ -34,6 +32,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
@@ -117,17 +116,6 @@ static GlueCopyPlan planGlueCopies(const MachineRegisterInfo &MRI,
   return Plan;
 }
 
-using AIERegUnitUtils::addRegUnits;
-using AIERegUnitUtils::overlapsRegUnits;
-
-/// Seed \p Out with the reg-units of every physreg live-in to \p MBB.
-static void addLiveInUnits(const MachineBasicBlock &MBB,
-                           const TargetRegisterInfo &TRI, BitVector &Out) {
-  LiveRegUnits LiveIns(TRI);
-  LiveIns.addLiveIns(MBB);
-  Out |= LiveIns.getBitVector();
-}
-
 /// Resolves \p MO to its concrete (sub-)physreg via VRM; null if unresolved.
 static MCRegister resolveOperandToPhys(const MachineOperand &MO,
                                        const TargetRegisterInfo &TRI,
@@ -148,22 +136,14 @@ static MCRegister resolveOperandToPhys(const MachineOperand &MO,
   return Phys;
 }
 
-/// Lane mask covered by the operand's sub-reg index (or full reg if none).
-static LaneBitmask laneMaskOf(const MachineOperand &MO,
-                              const TargetRegisterInfo &TRI) {
-  if (const unsigned SubIdx = MO.getSubReg())
-    return TRI.getSubRegIndexLaneMask(SubIdx);
-  return LaneBitmask::getAll();
-}
-
 /// Blocked reg-units before \p HeadMI: live-ins plus every physreg read
 /// earlier, re-resolved against live VRM so earlier splits are reflected.
-static BitVector computeBlockedUnits(const MachineBasicBlock &MBB,
-                                     const MachineInstr *HeadMI,
-                                     const TargetRegisterInfo &TRI,
-                                     const VirtRegMap &VRM) {
-  BitVector Blocked(TRI.getNumRegUnits());
-  addLiveInUnits(MBB, TRI, Blocked);
+static LiveRegUnits computeBlockedUnits(const MachineBasicBlock &MBB,
+                                        const MachineInstr *HeadMI,
+                                        const TargetRegisterInfo &TRI,
+                                        const VirtRegMap &VRM) {
+  LiveRegUnits Blocked(TRI);
+  Blocked.addLiveIns(MBB);
   for (const MachineInstr &MI : MBB) {
     if (&MI == HeadMI)
       break;
@@ -171,7 +151,7 @@ static BitVector computeBlockedUnits(const MachineBasicBlock &MBB,
       continue;
     for (const MachineOperand &UseMO : MI.uses())
       if (MCRegister Phys = resolveOperandToPhys(UseMO, TRI, VRM))
-        addRegUnits(TRI, Phys, Blocked);
+        Blocked.addReg(Phys);
   }
   return Blocked;
 }
@@ -184,7 +164,7 @@ class WARScanner {
   const TargetRegisterInfo &TRI;
   const VirtRegMap &VRM;
 
-  BitVector BlockedUnits;
+  LiveRegUnits BlockedUnits;
   DenseSet<Register> UsedVRegs;
 
   SmallVector<WARCandidate, 4> Candidates;
@@ -199,9 +179,8 @@ class WARScanner {
 public:
   WARScanner(MachineBasicBlock &MBB, const MachineRegisterInfo &MRI,
              const TargetRegisterInfo &TRI, const VirtRegMap &VRM)
-      : MBB(MBB), MRI(MRI), TRI(TRI), VRM(VRM),
-        BlockedUnits(TRI.getNumRegUnits()) {
-    addLiveInUnits(MBB, TRI, BlockedUnits);
+      : MBB(MBB), MRI(MRI), TRI(TRI), VRM(VRM), BlockedUnits(TRI) {
+    BlockedUnits.addLiveIns(MBB);
   }
 
   void scan();
@@ -234,7 +213,7 @@ void WARScanner::recordCandidateDef(MachineOperand &DefMO) {
   const MCRegister Phys = resolveOperandToPhys(DefMO, TRI, VRM);
   if (!Phys)
     return;
-  if (!overlapsRegUnits(TRI, Phys, BlockedUnits))
+  if (BlockedUnits.available(Phys))
     return;
   if (!UsedVRegs.contains(DefReg))
     return;
@@ -245,7 +224,7 @@ void WARScanner::recordCandidateDef(MachineOperand &DefMO) {
     WARCandidate New;
     New.DefVReg = DefReg;
     New.TouchedDefOps.push_back(&DefMO);
-    New.TouchedLanes = laneMaskOf(DefMO, TRI);
+    New.TouchedLanes = TRI.getSubRegIndexLaneMask(DefMO.getSubReg());
     Candidates.push_back(std::move(New));
     return;
   }
@@ -257,13 +236,12 @@ void WARScanner::recordCandidateDef(MachineOperand &DefMO) {
   if (Existing.IsRejected)
     return;
   Existing.TouchedDefOps.push_back(&DefMO);
-  Existing.TouchedLanes |= laneMaskOf(DefMO, TRI);
+  Existing.TouchedLanes |= TRI.getSubRegIndexLaneMask(DefMO.getSubReg());
 }
 
 void WARScanner::foldUse(const MachineOperand &UseMO, const MachineInstr &MI) {
-  const MCRegister Phys = resolveOperandToPhys(UseMO, TRI, VRM);
-  if (Phys)
-    addRegUnits(TRI, Phys, BlockedUnits);
+  if (const MCRegister Phys = resolveOperandToPhys(UseMO, TRI, VRM))
+    BlockedUnits.addReg(Phys);
   if (!UseMO.isReg() || !UseMO.getReg().isVirtual())
     return;
   const Register UsedVReg = UseMO.getReg();
@@ -294,7 +272,8 @@ void WARScanner::rejectUntouchedLaneReads() {
       for (const MachineOperand &MO : It->operands()) {
         if (!MO.isReg() || MO.getReg() != C.DefVReg || !MO.readsReg())
           continue;
-        if ((laneMaskOf(MO, TRI) & UntouchedLanes).any()) {
+        if ((TRI.getSubRegIndexLaneMask(MO.getSubReg()) & UntouchedLanes)
+                .any()) {
           C.IsRejected = true;
           break;
         }
@@ -310,7 +289,7 @@ class AIEWARBreaker : public MachineFunctionPass {
   LiveRegMatrix *LRM = nullptr;
   LiveIntervals *LIS = nullptr;
   mutable CopyCostCache CostCache;
-  BitVector CSRRegs;
+  RegisterClassInfo RegClassInfo;
 
   /// The rename physreg chosen for a candidate and its glue-COPY cost.
   struct RenamePlan {
@@ -329,7 +308,7 @@ class AIEWARBreaker : public MachineFunctionPass {
   /// Picks a non-CSR physreg in \p RC free of \p BlockedUnits and free
   /// over [Start, End); NoRegister if none qualifies.
   MCPhysReg pickRenamePhysReg(const TargetRegisterClass &RC,
-                              const BitVector &BlockedUnits, SlotIndex Start,
+                              const LiveRegUnits &BlockedUnits, SlotIndex Start,
                               SlotIndex End) const;
 
   /// Picks candidate \p C's rename physreg and its cost under \p Plan, or
@@ -368,14 +347,6 @@ class AIEWARBreaker : public MachineFunctionPass {
   /// Recompute live intervals for OldVReg and NewVReg after the split.
   void refreshIntervals(Register OldVReg, Register NewVReg);
 
-  /// Clears stale `dead` flags so recomputed live ranges aren't
-  /// truncated at defs that now feed the glue COPY.
-  void clearStaleDeadFlags(Register OldVReg, Register NewVReg) const;
-
-  /// Peels any disconnected components of \p VReg's interval into
-  /// fresh vregs grown into VRM (one per component, for the verifier).
-  void splitDisconnectedComponents(Register VReg);
-
   bool tryBreakWARsInMBB(MachineBasicBlock &MBB);
 
 public:
@@ -403,15 +374,14 @@ public:
 };
 
 MCPhysReg AIEWARBreaker::pickRenamePhysReg(const TargetRegisterClass &RC,
-                                           const BitVector &BlockedUnits,
+                                           const LiveRegUnits &BlockedUnits,
                                            SlotIndex Start,
                                            SlotIndex End) const {
-  for (MCPhysReg P : RC.getRegisters()) {
-    if (CSRRegs.test(P))
+  // getOrder is already free of reserved and non-allocatable registers.
+  for (MCPhysReg P : RegClassInfo.getOrder(&RC)) {
+    if (RegClassInfo.getLastCalleeSavedAlias(P))
       continue;
-    if (!MRI->isAllocatable(P))
-      continue;
-    if (overlapsRegUnits(*TRI, P, BlockedUnits))
+    if (!BlockedUnits.available(P))
       continue;
     if (LRM->checkInterference(Start, End, P))
       continue;
@@ -445,9 +415,9 @@ AIEWARBreaker::planRename(MachineBasicBlock &MBB, const WARCandidate &C,
 
   // Re-derived from scratch (not the scanner's own BlockedUnits): VRM may
   // have moved since an earlier candidate in this block was split.
-  BitVector Blocked = computeBlockedUnits(
+  LiveRegUnits Blocked = computeBlockedUnits(
       MBB, C.TouchedDefOps.front()->getParent(), *TRI, *VRM);
-  addRegUnits(*TRI, OldPhys, Blocked);
+  Blocked.addReg(OldPhys);
 
   const TargetRegisterClass *RC = MRI->getRegClass(C.DefVReg);
   const SlotIndex Start =
@@ -518,29 +488,25 @@ void AIEWARBreaker::insertGlueCopies(MachineBasicBlock &MBB,
 }
 
 void AIEWARBreaker::refreshIntervals(Register OldVReg, Register NewVReg) {
-  clearStaleDeadFlags(OldVReg, NewVReg);
+  // Stale `dead` flags would truncate the recomputed ranges at defs that now
+  // feed the glue COPY.
+  for (Register VReg : {OldVReg, NewVReg})
+    for (MachineOperand &Def : MRI->def_operands(VReg))
+      Def.setIsDead(false);
+
   // The glue COPYs extended OldVReg's range past its recorded physreg union.
   SmallSet<Register, 8> ToRepair;
   ToRepair.insert(OldVReg);
   AIESuperRegUtils::repairLiveIntervals(ToRepair, *VRM, *LRM, *LIS);
   LIS->createAndComputeVirtRegInterval(NewVReg);
-  splitDisconnectedComponents(OldVReg);
-  splitDisconnectedComponents(NewVReg);
-}
 
-void AIEWARBreaker::clearStaleDeadFlags(Register OldVReg,
-                                        Register NewVReg) const {
-  for (MachineOperand &Def : MRI->def_operands(OldVReg))
-    Def.setIsDead(false);
-  for (MachineOperand &Def : MRI->def_operands(NewVReg))
-    Def.setIsDead(false);
-}
-
-void AIEWARBreaker::splitDisconnectedComponents(Register VReg) {
   // OldVReg can split if the head's use killed it before the glue COPY
   // restarted it; NewVReg can split across disjoint use regions.
-  SmallVector<LiveInterval *, 4> Components;
-  AIESuperRegUtils::splitDisconnectedComponents(VReg, *LIS, *VRM, Components);
+  for (Register VReg : {OldVReg, NewVReg}) {
+    // Must start empty: splitSeparateComponents indexes Components.data().
+    SmallVector<LiveInterval *, 4> Components;
+    AIESuperRegUtils::splitDisconnectedComponents(VReg, *LIS, *VRM, Components);
+  }
 }
 
 std::optional<AIEWARBreaker::RenameDecision>
@@ -620,7 +586,7 @@ bool AIEWARBreaker::runOnMachineFunction(MachineFunction &MF) {
   VRM = &getAnalysis<VirtRegMapWrapperLegacy>().getVRM();
   LRM = &getAnalysis<LiveRegMatrixWrapperLegacy>().getLRM();
   LIS = &getAnalysis<LiveIntervalsWrapperPass>().getLIS();
-  CSRRegs = AIERegUnitUtils::computeCalleeSavedRegSet(*TRI, *MRI);
+  RegClassInfo.runOnMachineFunction(MF);
 
   LLVM_DEBUG(dbgs() << "*** AIE WAR Breaker: " << MF.getName() << " ***\n");
 
