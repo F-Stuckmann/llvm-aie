@@ -409,6 +409,10 @@ struct AIEBaseInstrInfo : public TargetInstrInfo {
     llvm_unreachable("Target didn't implement getNumReservedDelaySlots");
   }
 
+  /// Free move-pipe issue cycles AIEWARBreaker may spend on glue COPYs in an
+  /// outer-loop epilog's branch-delay slack; 0 disables same-LI WAR breaking.
+  virtual unsigned getOuterLoopEpilogCopySlack() const { return 4; }
+
   /// Check whether Opc represents a JNZ instruction. This is mainly for
   /// detecting a downcounting loop branch.
   virtual bool isJNZ(unsigned Opc) const { return false; }

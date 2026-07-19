@@ -40,6 +40,15 @@ constexpr StringLiteral OuterLoopPipelinedKey{
 
 bool isOuterLoopPipelined(const MachineBasicBlock &LoopLatch);
 
+/// Loop-hint key the outer-loop pipeliner stamps on its steady-state epilog,
+/// and that isOuterLoopEpilog() tests for. Single source for both sides.
+constexpr StringLiteral OuterLoopEpilogKey{
+    "llvm.loop.hint.aie_outerloop_epilog"};
+
+/// Returns true if MBB is the steady-state epilog block produced by the
+/// outer-loop pipeliner.
+bool isOuterLoopEpilog(const MachineBasicBlock &MBB);
+
 /// Returns true if this is a loop latch that has a pipeliner disable pragma,
 /// none otherwise.
 std::optional<bool> getPipelinerDisabled(const MachineBasicBlock &LoopBlock);
