@@ -118,6 +118,7 @@ static GlueCopyPlan planGlueCopies(const MachineRegisterInfo &MRI,
 }
 
 using AIERegUnitUtils::addRegUnits;
+using AIERegUnitUtils::overlapsRegUnits;
 
 /// Seed \p Out with the reg-units of every physreg live-in to \p MBB.
 static void addLiveInUnits(const MachineBasicBlock &MBB,
@@ -233,7 +234,7 @@ void WARScanner::recordCandidateDef(MachineOperand &DefMO) {
   const MCRegister Phys = resolveOperandToPhys(DefMO, TRI, VRM);
   if (!Phys)
     return;
-  if (!AIERegUnitUtils::overlapsRegUnits(TRI, Phys, BlockedUnits))
+  if (!overlapsRegUnits(TRI, Phys, BlockedUnits))
     return;
   if (!UsedVRegs.contains(DefReg))
     return;
@@ -397,7 +398,7 @@ MCPhysReg AIEWARBreaker::pickRenamePhysReg(const TargetRegisterClass &RC,
       continue;
     if (!MRI->isAllocatable(P))
       continue;
-    if (AIERegUnitUtils::overlapsRegUnits(*TRI, P, BlockedUnits))
+    if (overlapsRegUnits(*TRI, P, BlockedUnits))
       continue;
     if (LRM->checkInterference(Start, End, P))
       continue;
