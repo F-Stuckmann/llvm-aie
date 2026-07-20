@@ -24,7 +24,6 @@
 #include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/InitializePasses.h"
@@ -48,14 +47,6 @@ struct RewriteCandidate {
   SmallVector<MachineOperand *, 4> Defs;
   MachineInstr *FinalDef;
   MachineBasicBlock *Epilogue;
-};
-
-struct RenameDecision {
-  unsigned CandidateIndex;
-  MCPhysReg NewPhys;
-  unsigned CopyCost;
-  SlotIndex ProspectiveStart;
-  SlotIndex ProspectiveEnd;
 };
 
 class AIEEpilogueRegRewriter : public MachineFunctionPass {
@@ -92,18 +83,16 @@ private:
                     const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM,
                     LiveIntervals &LIS, SlotIndexes &Indexes) const;
 
-  std::optional<RenameDecision>
-  makeDecision(unsigned CandidateIndex, const RewriteCandidate &Candidate,
-               MachineFunction &MF, const AIEBaseRegisterInfo &TRI,
-               LiveIntervals &LIS, LiveRegMatrix &LRM, SlotIndexes &Indexes,
-               RegisterClassInfo &RCI, BitVector &ReservedRegUnits,
-               unsigned RemainingBudget) const;
+  MCPhysReg findReplacementPhysReg(const RewriteCandidate &Candidate,
+                                   const AIEBaseRegisterInfo &TRI,
+                                   LiveIntervals &LIS, LiveRegMatrix &LRM,
+                                   SlotIndexes &Indexes,
+                                   BitVector &ReservedRegUnits) const;
 
-  void commitDecision(const RenameDecision &Decision,
-                      RewriteCandidate &Candidate, MachineRegisterInfo &MRI,
-                      const AIEBaseInstrInfo &TII, VirtRegMap &VRM,
-                      LiveRegMatrix &LRM, LiveIntervals &LIS,
-                      LiveDebugVariables &DebugVars) const;
+  void commitRewrite(RewriteCandidate &Candidate, MCPhysReg NewPhys,
+                     MachineRegisterInfo &MRI, const AIEBaseInstrInfo &TII,
+                     VirtRegMap &VRM, LiveRegMatrix &LRM, LiveIntervals &LIS,
+                     LiveDebugVariables &DebugVars) const;
 };
 
 bool isPermittedPreservingUse(const MachineInstr &MI, unsigned UseIndex,
@@ -140,10 +129,13 @@ bool hasIndependentUse(const MachineInstr &MI, Register Reg,
 std::optional<RewriteCandidate> AIEEpilogueRegRewriter::collectCandidate(
     Register Reg, MachineBasicBlock &Epilogue, MachineRegisterInfo &MRI,
     const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM, LiveIntervals &LIS) const {
+  const TargetRegisterClass *RC = MRI.getRegClass(Reg);
+  if (!TRI.isVecOrAccRegClass(*RC))
+    return std::nullopt;
+
   if (!LIS.hasInterval(Reg) || !VRM.hasPhys(Reg))
     return std::nullopt;
 
-  const TargetRegisterClass *RC = MRI.getRegClass(Reg);
   const SmallSet<int, 8> CoveringSubRegs = TRI.getCoveringSubRegs(*RC);
   if (CoveringSubRegs.empty())
     return std::nullopt;
@@ -229,17 +221,6 @@ SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
   return Candidates;
 }
 
-bool isCalleeSaved(MCPhysReg PhysReg, const MachineFunction &MF,
-                   const AIEBaseRegisterInfo &TRI) {
-  const MCPhysReg *CSR = TRI.getCalleeSavedRegs(&MF);
-  if (!CSR)
-    return false;
-  for (; *CSR; ++CSR)
-    if (TRI.regsOverlap(PhysReg, *CSR))
-      return true;
-  return false;
-}
-
 std::optional<unsigned>
 getMaterializedCopyCost(const TargetRegisterClass &RC,
                         const AIEBaseRegisterInfo &TRI) {
@@ -259,11 +240,10 @@ getMaterializedCopyCost(const TargetRegisterClass &RC,
   }
 }
 
-std::optional<RenameDecision> AIEEpilogueRegRewriter::makeDecision(
-    unsigned CandidateIndex, const RewriteCandidate &Candidate,
-    MachineFunction &MF, const AIEBaseRegisterInfo &TRI, LiveIntervals &LIS,
-    LiveRegMatrix &LRM, SlotIndexes &Indexes, RegisterClassInfo &RCI,
-    BitVector &ReservedRegUnits, unsigned RemainingBudget) const {
+MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
+    const RewriteCandidate &Candidate, const AIEBaseRegisterInfo &TRI,
+    LiveIntervals &LIS, LiveRegMatrix &LRM, SlotIndexes &Indexes,
+    BitVector &ReservedRegUnits) const {
   const SlotIndex Boundary = Indexes.getIndexAfter(*Candidate.FinalDef);
   LiveInterval ProspectiveLI(Candidate.OldReg, 0.0F);
   SlotIndex FirstDef;
@@ -284,35 +264,22 @@ std::optional<RenameDecision> AIEEpilogueRegRewriter::makeDecision(
       ProspectiveLI.getNextValue(FirstDef, LIS.getVNInfoAllocator());
   ProspectiveLI.addSegment(LiveRange::Segment(FirstDef, Boundary, MainValue));
 
-  SmallVector<MCPhysReg, 16> AllocationOrder;
-  for (MCPhysReg PhysReg : RCI.getOrder(Candidate.RC)) {
-    if (!MF.getRegInfo().isReserved(PhysReg) &&
-        !isCalleeSaved(PhysReg, MF, TRI))
-      AllocationOrder.push_back(PhysReg);
-  }
-
-  const std::optional<unsigned> CopyCost =
-      getMaterializedCopyCost(*Candidate.RC, TRI);
-  if (!CopyCost || *CopyCost > RemainingBudget)
-    return std::nullopt;
-
   LRM.invalidateVirtRegs();
   MCPhysReg NewPhys = AIERegAllocationUtils::findFreeNonOverlappingPhysReg(
-      ProspectiveLI, *Candidate.RC, AllocationOrder, Candidate.OldPhys,
-      ReservedRegUnits, TRI, LRM);
+      ProspectiveLI, *Candidate.RC, Candidate.RC->getRegisters(),
+      Candidate.OldPhys, ReservedRegUnits, TRI, LRM);
   if (!NewPhys)
-    return std::nullopt;
+    return MCRegister::NoRegister;
 
   for (MCRegUnit Unit : TRI.regunits(NewPhys))
     ReservedRegUnits.set(Unit);
-  return RenameDecision{CandidateIndex, NewPhys, *CopyCost, FirstDef, Boundary};
+  return NewPhys;
 }
 
-void AIEEpilogueRegRewriter::commitDecision(
-    const RenameDecision &Decision, RewriteCandidate &Candidate,
-    MachineRegisterInfo &MRI, const AIEBaseInstrInfo &TII, VirtRegMap &VRM,
-    LiveRegMatrix &LRM, LiveIntervals &LIS,
-    LiveDebugVariables &DebugVars) const {
+void AIEEpilogueRegRewriter::commitRewrite(
+    RewriteCandidate &Candidate, MCPhysReg NewPhys, MachineRegisterInfo &MRI,
+    const AIEBaseInstrInfo &TII, VirtRegMap &VRM, LiveRegMatrix &LRM,
+    LiveIntervals &LIS, LiveDebugVariables &DebugVars) const {
   Register NewReg = MRI.cloneVirtualRegister(Candidate.OldReg);
   VRM.grow();
   for (MachineOperand *Def : Candidate.Defs)
@@ -334,18 +301,13 @@ void AIEEpilogueRegRewriter::commitDecision(
   LIS.shrinkToUses(&NewLI);
 
 #ifndef NDEBUG
-  for (const LiveRange::Segment &Segment : NewLI.segments)
-    assert(Decision.ProspectiveStart <= Segment.start &&
-           Segment.end <= Decision.ProspectiveEnd &&
-           "Committed interval escaped prospective bounds");
   LRM.invalidateVirtRegs();
-  assert(LRM.checkInterference(NewLI, Decision.NewPhys) ==
-             LiveRegMatrix::IK_Free &&
+  assert(LRM.checkInterference(NewLI, NewPhys) == LiveRegMatrix::IK_Free &&
          "Prevalidated physical register became unavailable");
 #endif
 
-  VRM.setRequiredPhys(NewReg, Decision.NewPhys);
-  LRM.assign(NewLI, Decision.NewPhys);
+  VRM.setRequiredPhys(NewReg, NewPhys);
+  LRM.assign(NewLI, NewPhys);
   SmallVector<Register, 2> SplitRegs{Candidate.OldReg, NewReg};
   DebugVars.splitRegister(Candidate.OldReg, SplitRegs, LIS);
 }
@@ -368,29 +330,31 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
   if (Candidates.empty())
     return false;
 
-  RegisterClassInfo RCI;
-  RCI.runOnMachineFunction(MF);
   BitVector ReservedRegUnits(TRI.getNumRegUnits());
   DenseMap<MachineBasicBlock *, unsigned> SpentBudget;
-  SmallVector<RenameDecision, 4> Decisions;
+  bool Changed = false;
 
-  for (unsigned I = 0, E = Candidates.size(); I != E; ++I) {
-    RewriteCandidate &Candidate = Candidates[I];
+  for (RewriteCandidate &Candidate : Candidates) {
     unsigned &Spent = SpentBudget[Candidate.Epilogue];
     if (Spent >= EpilogueCopyBudget)
       continue;
-    if (auto Decision =
-            makeDecision(I, Candidate, MF, TRI, LIS, LRM, Indexes, RCI,
-                         ReservedRegUnits, EpilogueCopyBudget - Spent)) {
-      Spent += Decision->CopyCost;
-      Decisions.push_back(*Decision);
-    }
+
+    const std::optional<unsigned> CopyCost =
+        getMaterializedCopyCost(*Candidate.RC, TRI);
+    if (!CopyCost || *CopyCost > EpilogueCopyBudget - Spent)
+      continue;
+
+    MCPhysReg NewPhys = findReplacementPhysReg(Candidate, TRI, LIS, LRM,
+                                               Indexes, ReservedRegUnits);
+    if (!NewPhys)
+      continue;
+
+    Spent += *CopyCost;
+    commitRewrite(Candidate, NewPhys, MRI, TII, VRM, LRM, LIS, DebugVars);
+    Changed = true;
   }
 
-  for (RenameDecision &Decision : Decisions)
-    commitDecision(Decision, Candidates[Decision.CandidateIndex], MRI, TII, VRM,
-                   LRM, LIS, DebugVars);
-  return !Decisions.empty();
+  return Changed;
 }
 
 } // namespace

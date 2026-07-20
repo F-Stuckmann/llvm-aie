@@ -112,7 +112,7 @@ cl::opt<bool>
                         cl::init(true), cl::Hidden);
 
 cl::opt<bool> EnableEpilogueRegRewrite(
-    "aie-epilogue-reg-rewrite",
+    "aie-enable-epilogue-reg-rewrite",
     cl::desc("Enable epilogue register renaming after allocation"),
     cl::init(true), cl::Hidden);
 

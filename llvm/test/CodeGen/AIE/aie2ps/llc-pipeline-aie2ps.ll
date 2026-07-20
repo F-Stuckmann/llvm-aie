@@ -18,10 +18,10 @@
 ; RUN: llc -O3 -mtriple=aie2ps -disable-verify -debug-pass=Structure < %s 2>&1 \
 ; RUN:   | grep -v 'Verify generated machine code' | FileCheck -match-full-lines -strict-whitespace -check-prefixes=AIE-O23 %s
 ; RUN: llc -O2 -mtriple=aie2ps -disable-verify -debug-pass=Structure \
-; RUN:   -aie-wawreg-rewrite=false -aie-epilogue-reg-rewrite=true < %s 2>&1 \
+; RUN:   -aie-wawreg-rewrite=false -aie-enable-epilogue-reg-rewrite=true < %s 2>&1 \
 ; RUN:   | FileCheck -check-prefix=EPILOGUE-ONLY %s
 ; RUN: llc -O2 -mtriple=aie2ps -disable-verify -debug-pass=Structure \
-; RUN:   -aie-wawreg-rewrite=true -aie-epilogue-reg-rewrite=false < %s 2>&1 \
+; RUN:   -aie-wawreg-rewrite=true -aie-enable-epilogue-reg-rewrite=false < %s 2>&1 \
 ; RUN:   | FileCheck -check-prefix=WAW-ONLY %s
 
 ; EPILOGUE-ONLY-NOT: AIE waw-reg rewrite
