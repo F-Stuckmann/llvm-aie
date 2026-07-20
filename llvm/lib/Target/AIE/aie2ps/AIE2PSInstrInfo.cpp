@@ -311,8 +311,34 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
   const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
 
-  if (AIE2PS::mMvSclSrcRegClass.contains(SrcReg) &&
-      AIE2PS::mMvSclDstRegClass.contains(DstReg)) {
+  if (AIE2PS::ACC2048RegClass.contains(SrcReg) &&
+      AIE2PS::ACC2048RegClass.contains(DstReg)) {
+    MCRegister DstLo = getLoSubReg(TRI, DstReg);
+    MCRegister DstHi = getHiSubReg(TRI, DstReg);
+    MCRegister SrcLo = getLoSubReg(TRI, SrcReg);
+    MCRegister SrcHi = getHiSubReg(TRI, SrcReg);
+    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
+            getLoSubReg(TRI, DstLo))
+        .addReg(getLoSubReg(TRI, SrcLo), getKillRegState(KillSrc));
+    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
+            getHiSubReg(TRI, DstLo))
+        .addReg(getHiSubReg(TRI, SrcLo), getKillRegState(KillSrc));
+    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
+            getLoSubReg(TRI, DstHi))
+        .addReg(getLoSubReg(TRI, SrcHi), getKillRegState(KillSrc));
+    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
+            getHiSubReg(TRI, DstHi))
+        .addReg(getHiSubReg(TRI, SrcHi), getKillRegState(KillSrc));
+  } else if (AIE2PS::ACC1024RegClass.contains(SrcReg) &&
+             AIE2PS::ACC1024RegClass.contains(DstReg)) {
+    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
+            getLoSubReg(TRI, DstReg))
+        .addReg(getLoSubReg(TRI, SrcReg), getKillRegState(KillSrc));
+    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
+            getHiSubReg(TRI, DstReg))
+        .addReg(getHiSubReg(TRI, SrcReg), getKillRegState(KillSrc));
+  } else if (AIE2PS::mMvSclSrcRegClass.contains(SrcReg) &&
+             AIE2PS::mMvSclDstRegClass.contains(DstReg)) {
     // Build MultiSlotPseudo in preference
     const unsigned MOVSclOpcode = getScalarMovOpcode(DstReg, SrcReg);
     BuildMI(MBB, MBBI, DL, get(MOVSclOpcode), DstReg)
@@ -360,7 +386,6 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         .addReg(SrcReg, getKillRegState(KillSrc));
   HANDLE_VMOV_CASE(mFm, mFm, f)
   HANDLE_VMOV_CASE(mWm, mWm, w)
-  HANDLE_VMOV_CASE(mCMm, mCMm, cm)
   HANDLE_VMOV_CASE(mEEm, mEEm, ee)
   HANDLE_VMOV_CASE(mEGm, mEGm, eg)
   HANDLE_VMOV_CASE(mFFm, mFFm, ff)
@@ -415,12 +440,6 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
              (AIE2PS::ACC1024RegClass.contains(DstReg) ||
               AIE2PS::VEC1024RegClass.contains(DstReg) ||
               AIE2PS::FIFO1024RegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
-  } else if ((AIE2PS::ACC2048RegClass.contains(SrcReg)) &&
-             (AIE2PS::ACC2048RegClass.contains(DstReg))) {
     copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
                 getLoSubReg(TRI, SrcReg), KillSrc);
     copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),

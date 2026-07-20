@@ -17,6 +17,18 @@
 ; RUN:   | grep -v 'Verify generated machine code' | FileCheck -match-full-lines -strict-whitespace -check-prefixes=AIE-O23 %s
 ; RUN: llc -O3 -mtriple=aie2ps -disable-verify -debug-pass=Structure < %s 2>&1 \
 ; RUN:   | grep -v 'Verify generated machine code' | FileCheck -match-full-lines -strict-whitespace -check-prefixes=AIE-O23 %s
+; RUN: llc -O2 -mtriple=aie2ps -disable-verify -debug-pass=Structure \
+; RUN:   -aie-wawreg-rewrite=false -aie-epilogue-reg-rewrite=true < %s 2>&1 \
+; RUN:   | FileCheck -check-prefix=EPILOGUE-ONLY %s
+; RUN: llc -O2 -mtriple=aie2ps -disable-verify -debug-pass=Structure \
+; RUN:   -aie-wawreg-rewrite=true -aie-epilogue-reg-rewrite=false < %s 2>&1 \
+; RUN:   | FileCheck -check-prefix=WAW-ONLY %s
+
+; EPILOGUE-ONLY-NOT: AIE waw-reg rewrite
+; EPILOGUE-ONLY: AIE epilogue register rewrite
+
+; WAW-ONLY: AIE waw-reg rewrite
+; WAW-ONLY-NOT: AIE epilogue register rewrite
 
 ; AIE-O0:Target Library Information
 ; AIE-O0-NEXT:Target Pass Configuration
@@ -263,6 +275,8 @@
 ; AIE-O1-NEXT:      AIE unallocated super-reg rewrite
 ; AIE-O1-NEXT:      Greedy Register Allocator
 ; AIE-O1-NEXT:      AIE waw-reg rewrite
+; AIE-O1-NEXT:      AIE epilogue register rewrite
+; AIE-O1-NEXT:      Live Stack Slot Analysis
 ; AIE-O1-NEXT:      Greedy Register Allocator
 ; AIE-O1-NEXT:      Virtual Register Rewriter
 ; AIE-O1-NEXT:      Stack Slot Coloring
@@ -498,6 +512,8 @@
 ; AIE-O23-NEXT:      AIE unallocated super-reg rewrite
 ; AIE-O23-NEXT:      Greedy Register Allocator
 ; AIE-O23-NEXT:      AIE waw-reg rewrite
+; AIE-O23-NEXT:      AIE epilogue register rewrite
+; AIE-O23-NEXT:      Live Stack Slot Analysis
 ; AIE-O23-NEXT:      Greedy Register Allocator
 ; AIE-O23-NEXT:      Virtual Register Rewriter
 ; AIE-O23-NEXT:      Stack Slot Coloring

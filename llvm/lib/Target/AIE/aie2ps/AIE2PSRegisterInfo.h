@@ -60,6 +60,8 @@ struct AIE2PSRegisterInfo : public AIE2PSGenRegisterInfo {
   const TargetRegisterClass &getMinClassForRegBank(const RegisterBank &RB,
                                                    LLT Ty) const override;
   const std::set<int> &getSubRegSplit(int RegClassId) const override;
+  SmallSet<int, 8>
+  getCoveringSubRegs(const TargetRegisterClass &RC) const override;
   const TargetRegisterClass *getConstrainedRegClassForOperand(
       const MachineOperand &MO, const MachineRegisterInfo &MRI) const override;
 

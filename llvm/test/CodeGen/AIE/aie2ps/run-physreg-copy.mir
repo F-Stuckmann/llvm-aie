@@ -318,8 +318,10 @@ name:             test_copy_cml
 body: |
   bb.0:
     ; CHECK-LABEL: name: test_copy_cml
-    ; CHECK: $cml1 = VMOV_alu_mv_mv_mv_cm $cml4
-    ; CHECK-NEXT: $cml2 = VMOV_alu_mv_mv_mv_cm $cml3
+    ; CHECK: $bmll1 = VMOV_alu_mv_mv_mv_x $bmll4
+    ; CHECK-NEXT: $bmlh1 = VMOV_alu_mv_mv_mv_x $bmlh4
+    ; CHECK-NEXT: $bmll2 = VMOV_alu_mv_mv_mv_x $bmll3
+    ; CHECK-NEXT: $bmlh2 = VMOV_alu_mv_mv_mv_x $bmlh3
   $cml1 = COPY $cml4
   $cml2 = COPY $cml3
 ...
@@ -329,10 +331,14 @@ name:             test_copy_cm
 body: |
   bb.0:
     ; CHECK-LABEL: name: test_copy_cm
-    ; CHECK: $cml1 = VMOV_alu_mv_mv_mv_cm $cml0
-    ; CHECK-NEXT: $cmh1 = VMOV_alu_mv_mv_mv_cm $cmh0
-    ; CHECK-NEXT: $cmh3 = VMOV_alu_mv_mv_mv_cm $cml2
-    ; CHECK-NEXT: $cml3 = VMOV_alu_mv_mv_mv_cm $cmh2
+    ; CHECK: $bmll1 = VMOV_alu_mv_mv_mv_x $bmll0
+    ; CHECK-NEXT: $bmlh1 = VMOV_alu_mv_mv_mv_x $bmlh0
+    ; CHECK-NEXT: $bmhl1 = VMOV_alu_mv_mv_mv_x $bmhl0
+    ; CHECK-NEXT: $bmhh1 = VMOV_alu_mv_mv_mv_x $bmhh0
+    ; CHECK-NEXT: $bmhl3 = VMOV_alu_mv_mv_mv_x $bmll2
+    ; CHECK-NEXT: $bmhh3 = VMOV_alu_mv_mv_mv_x $bmlh2
+    ; CHECK-NEXT: $bmll3 = VMOV_alu_mv_mv_mv_x $bmhl2
+    ; CHECK-NEXT: $bmlh3 = VMOV_alu_mv_mv_mv_x $bmhh2
   $cml1 = COPY $cml0
   $cmh1 = COPY $cmh0
   $cmh3 = COPY $cml2
@@ -344,10 +350,14 @@ name:             test_copy_dm
 body: |
   bb.0:
     ; CHECK-LABEL: name: test_copy_dm
-    ; CHECK: $cml1 = VMOV_alu_mv_mv_mv_cm $cml2
-    ; CHECK-NEXT: $cmh1 = VMOV_alu_mv_mv_mv_cm $cmh2
-    ; CHECK-NEXT: $cml2 = VMOV_alu_mv_mv_mv_cm $cml3
-    ; CHECK-NEXT: $cmh2 = VMOV_alu_mv_mv_mv_cm $cmh3
+    ; CHECK: $bmll1 = VMOV_alu_mv_mv_mv_x $bmll2
+    ; CHECK-NEXT: $bmlh1 = VMOV_alu_mv_mv_mv_x $bmlh2
+    ; CHECK-NEXT: $bmhl1 = VMOV_alu_mv_mv_mv_x $bmhl2
+    ; CHECK-NEXT: $bmhh1 = VMOV_alu_mv_mv_mv_x $bmhh2
+    ; CHECK-NEXT: $bmll2 = VMOV_alu_mv_mv_mv_x $bmll3
+    ; CHECK-NEXT: $bmlh2 = VMOV_alu_mv_mv_mv_x $bmlh3
+    ; CHECK-NEXT: $bmhl2 = VMOV_alu_mv_mv_mv_x $bmhl3
+    ; CHECK-NEXT: $bmhh2 = VMOV_alu_mv_mv_mv_x $bmhh3
   $dm1 = COPY $dm2
   $dm2 = COPY $dm3
 ...

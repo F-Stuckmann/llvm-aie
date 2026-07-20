@@ -533,6 +533,19 @@ const std::set<int> &AIE2PSRegisterInfo::getSubRegSplit(int RegClassId) const {
   return NoSplit;
 }
 
+SmallSet<int, 8>
+AIE2PSRegisterInfo::getCoveringSubRegs(const TargetRegisterClass &RC) const {
+  SmallSet<int, 8> SubRegs;
+  if (!AIE2PS::ACC2048RegClass.hasSubClassEq(&RC))
+    return SubRegs;
+
+  SubRegs.insert(AIE2PS::sub_512_acc_lo);
+  SubRegs.insert(AIE2PS::sub_512_acc_hi);
+  SubRegs.insert(AIE2PS::sub_1024_acc_hi_then_sub_512_acc_lo);
+  SubRegs.insert(AIE2PS::sub_1024_acc_hi_then_sub_512_acc_hi);
+  return SubRegs;
+}
+
 const TargetRegisterClass &
 AIE2PSRegisterInfo::getMinClassForRegBank(const RegisterBank &RB,
                                           LLT Ty) const {
