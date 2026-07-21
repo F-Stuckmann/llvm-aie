@@ -75,6 +75,11 @@ public:
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
 
+protected:
+  bool materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                       MCRegister SrcReg, bool KillSrc) const override;
+
+public:
   Register isLoadFromStackSlot(const MachineInstr &MI,
                                int &FrameIndex) const override;
   Register isStoreToStackSlot(const MachineInstr &MI,

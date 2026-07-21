@@ -488,85 +488,92 @@ void AIE2InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator MBBI,
                                 const DebugLoc &DL, MCRegister DstReg,
                                 MCRegister SrcReg, bool KillSrc,
-                                bool RenamableDest, bool RenamableSrc) const {
-  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
+                                bool /* RenamableDest */,
+                                bool /* RenamableSrc */) const {
+  const TargetRegisterInfo &TRI =
+      *MBB.getParent()->getRegInfo().getTargetRegisterInfo();
+  CopyMaterializer M(*this, TRI, MBB, MBBI, DL);
+  if (!materializeCopy(M, DstReg, SrcReg, KillSrc))
+    llvm_unreachable("unhandled case in copyPhysReg");
+}
+
+bool AIE2InstrInfo::materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                                    MCRegister SrcReg, bool KillSrc) const {
+  const TargetRegisterInfo &TRI = M.getRegisterInfo();
 
   // TODO : add support for 128-bit mask register
   if (AIE2::mMvSclSrcRegClass.contains(SrcReg) &&
       AIE2::mMvSclDstRegClass.contains(DstReg)) {
     const unsigned MOVSclOpcode = getScalarMovOpcode(DstReg, SrcReg);
-    BuildMI(MBB, MBBI, DL, get(MOVSclOpcode), DstReg)
+    M.buildInstr(get(MOVSclOpcode), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2::eLRegClass.contains(SrcReg)) &&
              (AIE2::eLRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::MOV_mv_scl),
-            TRI.getSubReg(DstReg, AIE2::sub_l_even))
+    M.buildInstr(get(AIE2::MOV_mv_scl), TRI.getSubReg(DstReg, AIE2::sub_l_even))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_l_even),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2::MOV_mv_scl),
-            TRI.getSubReg(DstReg, AIE2::sub_l_odd))
+    M.buildInstr(get(AIE2::MOV_mv_scl), TRI.getSubReg(DstReg, AIE2::sub_l_odd))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_l_odd),
                 getKillRegState(KillSrc));
   } else if ((AIE2::eDRegClass.contains(SrcReg)) &&
              (AIE2::eDRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2::eDSRegClass.contains(SrcReg)) &&
              (AIE2::eDSRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2::VEC128RegClass.contains(SrcReg) ||
               AIE2::VEC256RegClass.contains(SrcReg) ||
               AIE2::ACC256RegClass.contains(SrcReg)) &&
              (AIE2::VEC128RegClass.contains(DstReg) ||
               AIE2::VEC256RegClass.contains(DstReg) ||
               AIE2::ACC256RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_w), DstReg)
+    M.buildInstr(get(AIE2::VMOV_mv_w), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2::VEC512RegClass.contains(SrcReg) ||
               AIE2::ACC512RegClass.contains(SrcReg)) &&
              (AIE2::VEC512RegClass.contains(DstReg) ||
               AIE2::ACC512RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_x), DstReg)
+    M.buildInstr(get(AIE2::VMOV_mv_x), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2::VEC1024RegClass.contains(SrcReg)) &&
              (AIE2::VEC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_x),
-            TRI.getSubReg(DstReg, AIE2::sub_512_lo))
+    M.buildInstr(get(AIE2::VMOV_mv_x), TRI.getSubReg(DstReg, AIE2::sub_512_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_512_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_x),
-            TRI.getSubReg(DstReg, AIE2::sub_512_hi))
+    M.buildInstr(get(AIE2::VMOV_mv_x), TRI.getSubReg(DstReg, AIE2::sub_512_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_512_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2::ACC1024RegClass.contains(SrcReg)) &&
              (AIE2::ACC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_cm), DstReg)
+    M.buildInstr(get(AIE2::VMOV_mv_cm), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2::VEC1024RegClass.contains(SrcReg) ||
               AIE2::ACC1024RegClass.contains(SrcReg)) &&
              (AIE2::VEC1024RegClass.contains(DstReg) ||
               AIE2::ACC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_x),
-            TRI.getSubReg(DstReg, AIE2::sub_512_lo))
+    M.buildInstr(get(AIE2::VMOV_mv_x), TRI.getSubReg(DstReg, AIE2::sub_512_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_512_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_x),
-            TRI.getSubReg(DstReg, AIE2::sub_512_hi))
+    M.buildInstr(get(AIE2::VMOV_mv_x), TRI.getSubReg(DstReg, AIE2::sub_512_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_512_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2::SPARSEVEC640RegClass.contains(SrcReg)) &&
              (AIE2::SPARSEVEC640RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_x),
-            TRI.getSubReg(DstReg, AIE2::sub_sparse_x))
+    M.buildInstr(get(AIE2::VMOV_mv_x),
+                 TRI.getSubReg(DstReg, AIE2::sub_sparse_x))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_sparse_x),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2::VMOV_mv_w),
-            TRI.getSubReg(DstReg, AIE2::sub_sparse_q))
+    M.buildInstr(get(AIE2::VMOV_mv_w),
+                 TRI.getSubReg(DstReg, AIE2::sub_sparse_q))
         .addReg(TRI.getSubReg(SrcReg, AIE2::sub_sparse_q),
                 getKillRegState(KillSrc));
   } else {
-    llvm_unreachable("unhandled case in copyPhysReg");
+    return false;
   }
+
+  return true;
 }
 
 // Some AIE instructions like Load/Stores take compound register classes

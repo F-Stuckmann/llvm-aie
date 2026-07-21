@@ -221,25 +221,6 @@ SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
   return Candidates;
 }
 
-std::optional<unsigned>
-getMaterializedCopyCost(const TargetRegisterClass &RC,
-                        const AIEBaseRegisterInfo &TRI) {
-  const TypeSize RegSize = TRI.getRegSizeInBits(RC);
-  if (RegSize.isScalable())
-    return std::nullopt;
-
-  switch (RegSize.getFixedValue()) {
-  case 2048:
-    return 4;
-  case 1024:
-    return 2;
-  case 512:
-    return 1;
-  default:
-    return std::nullopt;
-  }
-}
-
 MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
     const RewriteCandidate &Candidate, const AIEBaseRegisterInfo &TRI,
     LiveIntervals &LIS, LiveRegMatrix &LRM, SlotIndexes &Indexes,
@@ -268,11 +249,6 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
   MCPhysReg NewPhys = AIERegAllocationUtils::findFreeNonOverlappingPhysReg(
       ProspectiveLI, *Candidate.RC, Candidate.RC->getRegisters(),
       Candidate.OldPhys, ReservedRegUnits, TRI, LRM);
-  if (!NewPhys)
-    return MCRegister::NoRegister;
-
-  for (MCRegUnit Unit : TRI.regunits(NewPhys))
-    ReservedRegUnits.set(Unit);
   return NewPhys;
 }
 
@@ -339,16 +315,18 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
     if (Spent >= EpilogueCopyBudget)
       continue;
 
-    const std::optional<unsigned> CopyCost =
-        getMaterializedCopyCost(*Candidate.RC, TRI);
-    if (!CopyCost || *CopyCost > EpilogueCopyBudget - Spent)
-      continue;
-
     MCPhysReg NewPhys = findReplacementPhysReg(Candidate, TRI, LIS, LRM,
                                                Indexes, ReservedRegUnits);
     if (!NewPhys)
       continue;
 
+    const std::optional<unsigned> CopyCost =
+        TII.getCopyCost(TRI, Candidate.OldPhys, NewPhys);
+    if (!CopyCost || *CopyCost > EpilogueCopyBudget - Spent)
+      continue;
+
+    for (MCRegUnit Unit : TRI.regunits(NewPhys))
+      ReservedRegUnits.set(Unit);
     Spent += *CopyCost;
     commitRewrite(Candidate, NewPhys, MRI, TII, VRM, LRM, LIS, DebugVars);
     Changed = true;

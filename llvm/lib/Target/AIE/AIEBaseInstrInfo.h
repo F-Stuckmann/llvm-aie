@@ -1009,6 +1009,54 @@ struct AIEBaseInstrInfo : public TargetInstrInfo {
   }
 
 public:
+  class CopyInstrBuilder {
+  public:
+    CopyInstrBuilder(MachineFunction *MF = nullptr, MachineInstr *MI = nullptr)
+        : MF(MF), MI(MI) {}
+
+    CopyInstrBuilder &addReg(Register Reg, unsigned Flags = 0);
+    CopyInstrBuilder &addImm(int64_t Imm);
+
+  private:
+    MachineFunction *MF;
+    MachineInstr *MI;
+  };
+
+  /// Materializes physical-register copies either into a machine basic block
+  /// or into an instruction count. Target copy lowering uses this common
+  /// interface so both operations exercise the same implementation.
+  class CopyMaterializer {
+  public:
+    CopyMaterializer(const AIEBaseInstrInfo &TII, const TargetRegisterInfo &TRI,
+                     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                     const DebugLoc &DL);
+    CopyMaterializer(const AIEBaseInstrInfo &TII,
+                     const TargetRegisterInfo &TRI);
+
+    CopyInstrBuilder buildInstr(const MCInstrDesc &Desc, Register DstReg);
+    bool copy(MCRegister DstReg, MCRegister SrcReg, bool KillSrc);
+    unsigned getNumInstructions() const { return NumInstructions; }
+    const TargetRegisterInfo &getRegisterInfo() const { return TRI; }
+
+  private:
+    struct InsertionPoint {
+      MachineBasicBlock &MBB;
+      MachineBasicBlock::iterator MBBI;
+      const DebugLoc &DL;
+    };
+
+    const AIEBaseInstrInfo &TII;
+    const TargetRegisterInfo &TRI;
+    std::optional<InsertionPoint> InsertPt;
+    unsigned NumInstructions = 0;
+  };
+
+  /// Return the number of instructions materialized for an exact physical
+  /// register copy, or std::nullopt if the copy is unsupported.
+  std::optional<unsigned> getCopyCost(const TargetRegisterInfo &TRI,
+                                      MCRegister DstReg,
+                                      MCRegister SrcReg) const;
+
   /// Expand a spill pseudo-instruction into actual target instructions. This
   /// will essentially split the register being handled into its sub-registers,
   /// until there is an actual instruction that can handle them.
@@ -1063,6 +1111,9 @@ public:
   };
 
 protected:
+  virtual bool materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                               MCRegister SrcReg, bool KillSrc) const = 0;
+
   struct AIERegOffsetSpillInstrInfo {
     /// Opcode for spill using register offset.
     unsigned SpillOpCode;
@@ -1085,10 +1136,8 @@ protected:
   }
 
   // Copy SrcReg to DstReg through their sub-registers.
-  void copyThroughSubRegs(MachineBasicBlock &MBB,
-                          MachineBasicBlock::iterator MBBI, const DebugLoc &DL,
-                          MCRegister DstReg, MCRegister SrcReg,
-                          bool KillSrc) const;
+  bool copyThroughSubRegs(CopyMaterializer &M, MCRegister DstReg,
+                          MCRegister SrcReg, bool KillSrc) const;
 
 #if 0
   // TODO. I guess this should wait for Davy's PR to land

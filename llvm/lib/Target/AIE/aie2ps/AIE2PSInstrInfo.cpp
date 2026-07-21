@@ -307,9 +307,21 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                   MachineBasicBlock::iterator MBBI,
                                   const DebugLoc &DL, MCRegister DstReg,
                                   MCRegister SrcReg, bool KillSrc,
-                                  bool RenamableDest, bool RenamableSrc) const {
-  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
+                                  bool /* RenamableDest */,
+                                  bool /* RenamableSrc */) const {
+  const TargetRegisterInfo &TRI =
+      *MBB.getParent()->getRegInfo().getTargetRegisterInfo();
+  CopyMaterializer M(*this, TRI, MBB, MBBI, DL);
+  if (!materializeCopy(M, DstReg, SrcReg, KillSrc)) {
+    errs() << "copyPhysReg: cannot copy " << TRI.getName(SrcReg) << " -> "
+           << TRI.getName(DstReg) << '\n';
+    llvm_unreachable("unhandled case in copyPhysReg");
+  }
+}
+
+bool AIE2PSInstrInfo::materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                                      MCRegister SrcReg, bool KillSrc) const {
+  const TargetRegisterInfo &TRI = M.getRegisterInfo();
 
   if (AIE2PS::ACC2048RegClass.contains(SrcReg) &&
       AIE2PS::ACC2048RegClass.contains(DstReg)) {
@@ -317,37 +329,31 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     MCRegister DstHi = getHiSubReg(TRI, DstReg);
     MCRegister SrcLo = getLoSubReg(TRI, SrcReg);
     MCRegister SrcHi = getHiSubReg(TRI, SrcReg);
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
-            getLoSubReg(TRI, DstLo))
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_x), getLoSubReg(TRI, DstLo))
         .addReg(getLoSubReg(TRI, SrcLo), getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
-            getHiSubReg(TRI, DstLo))
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_x), getHiSubReg(TRI, DstLo))
         .addReg(getHiSubReg(TRI, SrcLo), getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
-            getLoSubReg(TRI, DstHi))
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_x), getLoSubReg(TRI, DstHi))
         .addReg(getLoSubReg(TRI, SrcHi), getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
-            getHiSubReg(TRI, DstHi))
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_x), getHiSubReg(TRI, DstHi))
         .addReg(getHiSubReg(TRI, SrcHi), getKillRegState(KillSrc));
   } else if (AIE2PS::ACC1024RegClass.contains(SrcReg) &&
              AIE2PS::ACC1024RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
-            getLoSubReg(TRI, DstReg))
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_x), getLoSubReg(TRI, DstReg))
         .addReg(getLoSubReg(TRI, SrcReg), getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_x),
-            getHiSubReg(TRI, DstReg))
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_x), getHiSubReg(TRI, DstReg))
         .addReg(getHiSubReg(TRI, SrcReg), getKillRegState(KillSrc));
   } else if (AIE2PS::mMvSclSrcRegClass.contains(SrcReg) &&
              AIE2PS::mMvSclDstRegClass.contains(DstReg)) {
     // Build MultiSlotPseudo in preference
     const unsigned MOVSclOpcode = getScalarMovOpcode(DstReg, SrcReg);
-    BuildMI(MBB, MBBI, DL, get(MOVSclOpcode), DstReg)
+    M.buildInstr(get(MOVSclOpcode), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
     // clang-format off
 #define HANDLE_MOV_CASE(SRC_CLASS, DST_CLASS, OPCODE)                          \
   } else if ((AIE2PS::SRC_CLASS##RegClass.contains(SrcReg)) &&                 \
              (AIE2PS::DST_CLASS##RegClass.contains(DstReg))) {                 \
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::MOV_alu_mv_mv_mv_##OPCODE), DstReg)     \
+    M.buildInstr(get(AIE2PS::MOV_alu_mv_mv_mv_##OPCODE), DstReg)               \
         .addReg(SrcReg, getKillRegState(KillSrc));
   HANDLE_MOV_CASE(eR, mSCm, sc_r)
   HANDLE_MOV_CASE(mSCm, eR, r_sc)
@@ -371,18 +377,21 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     // clang-format on
   } else if ((AIE2PS::eLRegClass.contains(SrcReg)) &&
              (AIE2PS::eLRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2PS::eDRegClass.contains(SrcReg)) &&
              (AIE2PS::eDRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2PS::eDSRegClass.contains(SrcReg)) &&
              (AIE2PS::eDSRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
     // clang-format off
 #define HANDLE_VMOV_CASE(SRC_CLASS, DST_CLASS, OPCODE)                         \
   } else if ((AIE2PS::SRC_CLASS##RegClass.contains(SrcReg)) &&                 \
              (AIE2PS::DST_CLASS##RegClass.contains(DstReg))) {                 \
-    BuildMI(MBB, MBBI, DL, get(AIE2PS::VMOV_alu_mv_mv_mv_##OPCODE), DstReg)    \
+    M.buildInstr(get(AIE2PS::VMOV_alu_mv_mv_mv_##OPCODE), DstReg)              \
         .addReg(SrcReg, getKillRegState(KillSrc));
   HANDLE_VMOV_CASE(mFm, mFm, f)
   HANDLE_VMOV_CASE(mWm, mWm, w)
@@ -404,54 +413,49 @@ void AIE2PSInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     // clang-format on
   } else if ((AIE2PS::eLRegClass.contains(SrcReg)) &&
              (AIE2PS::EXPVEC64RegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
+    if (!M.copy(getLoSubReg(TRI, DstReg), getLoSubReg(TRI, SrcReg), KillSrc) ||
+        !M.copy(getHiSubReg(TRI, DstReg), getHiSubReg(TRI, SrcReg), KillSrc))
+      return false;
   } else if ((AIE2PS::EXPVEC64RegClass.contains(SrcReg)) &&
              (AIE2PS::eLRegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
+    if (!M.copy(getLoSubReg(TRI, DstReg), getLoSubReg(TRI, SrcReg), KillSrc) ||
+        !M.copy(getHiSubReg(TRI, DstReg), getHiSubReg(TRI, SrcReg), KillSrc))
+      return false;
   } else if ((AIE2PS::eLRegClass.contains(SrcReg) &&
               AIE2PS::mGGaRegClass.contains(DstReg)) ||
              (AIE2PS::mGGaRegClass.contains(SrcReg) &&
               AIE2PS::eLRegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
+    if (!M.copy(getLoSubReg(TRI, DstReg), getLoSubReg(TRI, SrcReg), KillSrc) ||
+        !M.copy(getHiSubReg(TRI, DstReg), getHiSubReg(TRI, SrcReg), KillSrc))
+      return false;
   } else if ((AIE2PS::mEYwRegClass.contains(SrcReg)) &&
              (AIE2PS::mEYwRegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
+    if (!M.copy(getLoSubReg(TRI, DstReg), getLoSubReg(TRI, SrcReg), KillSrc) ||
+        !M.copy(getHiSubReg(TRI, DstReg), getHiSubReg(TRI, SrcReg), KillSrc))
+      return false;
   } else if ((AIE2PS::mFEYwRegClass.contains(SrcReg)) &&
              (AIE2PS::mFEYwRegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
+    if (!M.copy(getLoSubReg(TRI, DstReg), getLoSubReg(TRI, SrcReg), KillSrc) ||
+        !M.copy(getHiSubReg(TRI, DstReg), getHiSubReg(TRI, SrcReg), KillSrc))
+      return false;
   } else if ((AIE2PS::ACC1024RegClass.contains(SrcReg) ||
               AIE2PS::VEC1024RegClass.contains(SrcReg) ||
               AIE2PS::FIFO1024RegClass.contains(SrcReg)) &&
              (AIE2PS::ACC1024RegClass.contains(DstReg) ||
               AIE2PS::VEC1024RegClass.contains(DstReg) ||
               AIE2PS::FIFO1024RegClass.contains(DstReg))) {
-    copyPhysReg(MBB, MBBI, DL, getLoSubReg(TRI, DstReg),
-                getLoSubReg(TRI, SrcReg), KillSrc);
-    copyPhysReg(MBB, MBBI, DL, getHiSubReg(TRI, DstReg),
-                getHiSubReg(TRI, SrcReg), KillSrc);
+    if (!M.copy(getLoSubReg(TRI, DstReg), getLoSubReg(TRI, SrcReg), KillSrc) ||
+        !M.copy(getHiSubReg(TRI, DstReg), getHiSubReg(TRI, SrcReg), KillSrc))
+      return false;
   } else if ((AIE2PS::ePSRFLdFRegClass.contains(SrcReg)) &&
              (AIE2PS::ePSRFLdFRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else {
-    errs() << "copyPhysReg: cannot copy " << TRI.getName(SrcReg) << " -> "
-           << TRI.getName(DstReg) << '\n';
-    llvm_unreachable("unhandled case in copyPhysReg");
+    return false;
   }
+
+  return true;
 }
 
 static const TargetRegisterClass *

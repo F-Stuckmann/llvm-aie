@@ -808,13 +808,10 @@ static void collectSubRegs(MCRegister Reg, SmallSet<MCRegister, 8> &SubRegs,
   }
 }
 
-void AIEBaseInstrInfo::copyThroughSubRegs(MachineBasicBlock &MBB,
-                                          MachineBasicBlock::iterator MBBI,
-                                          const DebugLoc &DL, MCRegister DstReg,
-                                          MCRegister SrcReg,
+bool AIEBaseInstrInfo::copyThroughSubRegs(CopyMaterializer &M,
+                                          MCRegister DstReg, MCRegister SrcReg,
                                           bool KillSrc) const {
-  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
+  const TargetRegisterInfo &TRI = M.getRegisterInfo();
 
   SmallSet<MCRegister, 8> SrcSubRegs;
   collectSubRegs(SrcReg, SrcSubRegs, TRI);
@@ -822,8 +819,60 @@ void AIEBaseInstrInfo::copyThroughSubRegs(MachineBasicBlock &MBB,
   for (MCRegister SrcSubReg : SrcSubRegs) {
     unsigned SubRegIdx = TRI.getSubRegIndex(SrcReg, SrcSubReg);
     MCRegister DstSubReg = TRI.getSubReg(DstReg, SubRegIdx);
-    copyPhysReg(MBB, MBBI, DL, DstSubReg, SrcSubReg, KillSrc);
+    if (!M.copy(DstSubReg, SrcSubReg, KillSrc))
+      return false;
   }
+  return true;
+}
+
+AIEBaseInstrInfo::CopyInstrBuilder &
+AIEBaseInstrInfo::CopyInstrBuilder::addReg(Register Reg, unsigned Flags) {
+  if (MI)
+    MachineInstrBuilder(*MF, MI).addReg(Reg, Flags);
+  return *this;
+}
+
+AIEBaseInstrInfo::CopyInstrBuilder &
+AIEBaseInstrInfo::CopyInstrBuilder::addImm(int64_t Imm) {
+  if (MI)
+    MachineInstrBuilder(*MF, MI).addImm(Imm);
+  return *this;
+}
+
+AIEBaseInstrInfo::CopyMaterializer::CopyMaterializer(
+    const AIEBaseInstrInfo &TII, const TargetRegisterInfo &TRI,
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    const DebugLoc &DL)
+    : TII(TII), TRI(TRI), InsertPt(InsertionPoint{MBB, MBBI, DL}) {}
+
+AIEBaseInstrInfo::CopyMaterializer::CopyMaterializer(
+    const AIEBaseInstrInfo &TII, const TargetRegisterInfo &TRI)
+    : TII(TII), TRI(TRI) {}
+
+AIEBaseInstrInfo::CopyInstrBuilder
+AIEBaseInstrInfo::CopyMaterializer::buildInstr(const MCInstrDesc &Desc,
+                                               Register DstReg) {
+  ++NumInstructions;
+  if (!InsertPt)
+    return CopyInstrBuilder();
+  return CopyInstrBuilder(
+      InsertPt->MBB.getParent(),
+      BuildMI(InsertPt->MBB, InsertPt->MBBI, InsertPt->DL, Desc, DstReg)
+          .getInstr());
+}
+
+bool AIEBaseInstrInfo::CopyMaterializer::copy(MCRegister DstReg,
+                                              MCRegister SrcReg, bool KillSrc) {
+  return TII.materializeCopy(*this, DstReg, SrcReg, KillSrc);
+}
+
+std::optional<unsigned>
+AIEBaseInstrInfo::getCopyCost(const TargetRegisterInfo &TRI, MCRegister DstReg,
+                              MCRegister SrcReg) const {
+  CopyMaterializer M(*this, TRI);
+  if (!M.copy(DstReg, SrcReg, false))
+    return std::nullopt;
+  return M.getNumInstructions();
 }
 
 static bool isPreRA(const MachineFunction &MF) {
