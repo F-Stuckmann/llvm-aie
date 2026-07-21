@@ -244,7 +244,7 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
     const RewriteCandidate &Candidate, const AIEBaseRegisterInfo &TRI,
     LiveIntervals &LIS, LiveRegMatrix &LRM, SlotIndexes &Indexes,
     BitVector &ReservedRegUnits) const {
-  const SlotIndex Boundary = Indexes.getIndexAfter(*Candidate.FinalDef);
+  const SlotIndex Boundary = Indexes.getMBBEndIdx(Candidate.Epilogue);
   LiveInterval ProspectiveLI(Candidate.OldReg, 0.0F);
   SlotIndex FirstDef;
 
@@ -286,7 +286,7 @@ void AIEEpilogueRegRewriter::commitRewrite(
     Def->setReg(NewReg);
 
   MachineInstr *Copy =
-      BuildMI(*Candidate.Epilogue, std::next(Candidate.FinalDef->getIterator()),
+      BuildMI(*Candidate.Epilogue, Candidate.Epilogue->getFirstTerminator(),
               Candidate.FinalDef->getDebugLoc(), TII.get(TargetOpcode::COPY),
               Candidate.OldReg)
           .addReg(NewReg)
