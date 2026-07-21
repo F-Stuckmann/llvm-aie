@@ -7,21 +7,21 @@
 # (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
 
 # RUN: llc -mtriple=aie2ps --aie-wawreg-rewrite=false \
-# RUN:   --aie-enable-epilogue-reg-rewrite --start-before=greedy \
+# RUN:   --aie-enable-epilogue-reg-rewriter --start-before=greedy \
 # RUN:   --stop-after=aie-epilogue-reg-rewrite %s -o - | \
 # RUN:   FileCheck %s --check-prefix=DEFAULT
 # RUN: llc -mtriple=aie2ps --aie-wawreg-rewrite=false \
-# RUN:   --aie-enable-epilogue-reg-rewrite \
+# RUN:   --aie-enable-epilogue-reg-rewriter \
 # RUN:   --aie-epilogue-reg-rewrite-copy-budget=3 --start-before=greedy \
 # RUN:   --stop-after=aie-epilogue-reg-rewrite %s -o - | \
 # RUN:   FileCheck %s --check-prefix=BUDGET3
 # RUN: llc -mtriple=aie2ps --aie-wawreg-rewrite=false \
-# RUN:   --aie-enable-epilogue-reg-rewrite \
+# RUN:   --aie-enable-epilogue-reg-rewriter \
 # RUN:   --aie-epilogue-reg-rewrite-copy-budget=8 --start-before=greedy \
 # RUN:   --stop-after=aie-epilogue-reg-rewrite %s -o - | \
 # RUN:   FileCheck %s --check-prefix=BUDGET8
 # RUN: llc -mtriple=aie2ps --aie-wawreg-rewrite=false \
-# RUN:   --aie-enable-epilogue-reg-rewrite \
+# RUN:   --aie-enable-epilogue-reg-rewriter \
 # RUN:   --aie-epilogue-reg-rewrite-copy-budget=8 --start-before=greedy \
 # RUN:   --stop-after=virtregrewriter %s -o - | \
 # RUN:   FileCheck %s --check-prefix=PHYS

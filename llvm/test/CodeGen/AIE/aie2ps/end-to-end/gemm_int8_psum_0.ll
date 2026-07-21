@@ -177,12 +177,12 @@ define dso_local void @gemm_int8_psum_0(
 ; CHECK-NEXT:    vlda bmhh2, [p4], #64
 ; CHECK-NEXT:    vlda bmll1, [p4], #64; vshuffle x10, x3, x0, r22
 ; CHECK-NEXT:    vlda bmlh1, [p4], #64; vst.srs.4x dm3, s0, srssign0, [p2], #64; vshuffle x1, x5, x0, r24
-; CHECK-NEXT:    vlda bmhl1, [p4], #64; vst.srs.4x dm2, s0, srssign0, [p2], m5; jnzd r1, r1, p5; vmov bmll3, bmll4
-; CHECK-NEXT:    vlda bmhh1, [p4], #64; vst.srs.4x dm1, s0, srssign0, [p2], #64; vmov bmlh3, bmlh4 // Delay Slot 5
-; CHECK-NEXT:    vlda bmll0, [p4], #64; vst.2d.srs.4x dm0, s0, srssign0, [p2], d2; movx srssign0, #0; vmov bmhl3, bmhl4 // Delay Slot 4
-; CHECK-NEXT:    vlda bmlh0, [p4], #64; vmov bmhh3, bmhh4 // Delay Slot 3
-; CHECK-NEXT:    vlda bmhl0, [p4], #64; vshuffle x10, x10, x0, r20 // Delay Slot 2
-; CHECK-NEXT:    vlda bmhh0, [p4], #64; vshuffle x1, x1, x0, r26 // Delay Slot 1
+; CHECK-NEXT:    vlda bmhl1, [p4], #64; vst.srs.4x dm2, s0, srssign0, [p2], m5; jnzd r1, r1, p5; vshuffle x10, x10, x0, r20
+; CHECK-NEXT:    vlda bmhh1, [p4], #64; vst.srs.4x dm1, s0, srssign0, [p2], #64; vshuffle x1, x1, x0, r26 // Delay Slot 5
+; CHECK-NEXT:    vlda bmll0, [p4], #64; vst.2d.srs.4x dm0, s0, srssign0, [p2], d2; movx srssign0, #0; vmov bmll3, bmll4 // Delay Slot 4
+; CHECK-NEXT:    vlda bmlh0, [p4], #64; vmov bmlh3, bmlh4 // Delay Slot 3
+; CHECK-NEXT:    vlda bmhl0, [p4], #64; vmov bmhl3, bmhl4 // Delay Slot 2
+; CHECK-NEXT:    vlda bmhh0, [p4], #64; vmov bmhh3, bmhh4 // Delay Slot 1
 ; CHECK-NEXT:  // %bb.4: // %lastiter.stage1.top
 ; CHECK-NEXT:    vldb x3, [p1], m4; vmul dm4, x0, x4, r12
 ; CHECK-NEXT:    vlda.3d x1, [p1], d1

@@ -56,7 +56,7 @@ define void @conv2d_opt_outerloop_out_mode_0(
 ; REMARKS-NEXT:   - Prologue:        bb.6.steady.stage1.top
 ; REMARKS-NEXT:   - PrologueBundles: '12'
 ; REMARKS-NEXT:   - Epilogue:        bb.8.steady.stage1.bottom.and.stage0.top
-; REMARKS-NEXT:   - EpilogueBundles: '17'
+; REMARKS-NEXT:   - EpilogueBundles: '20'
 ; REMARKS-NEXT: ...
 ; REMARKS: --- !Passed
 ; REMARKS-NEXT: Pass:            pipeliner

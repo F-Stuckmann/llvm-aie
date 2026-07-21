@@ -45,7 +45,6 @@ struct RewriteCandidate {
   MCPhysReg OldPhys;
   const TargetRegisterClass *RC;
   SmallVector<MachineOperand *, 4> Defs;
-  MachineInstr *FinalDef;
   MachineBasicBlock *Epilogue;
 };
 
@@ -95,87 +94,71 @@ private:
                      LiveDebugVariables &DebugVars) const;
 };
 
-bool isPermittedPreservingUse(const MachineInstr &MI, unsigned UseIndex,
-                              unsigned DefIndex) {
-  const MachineOperand &Use = MI.getOperand(UseIndex);
-  if (Use.isImplicit())
-    return true;
-  return Use.isTied() && MI.findTiedOperandIdx(UseIndex) == DefIndex;
-}
-
-SmallVector<MachineOperand *, 2> getPartialDefs(MachineInstr &MI,
-                                                Register Reg) {
-  SmallVector<MachineOperand *, 2> Defs;
-  for (MachineOperand &MO : MI.operands()) {
-    if (MO.isReg() && MO.isDef() && MO.getReg() == Reg && MO.getSubReg())
-      Defs.push_back(&MO);
-  }
-  return Defs;
-}
-
-bool hasIndependentUse(const MachineInstr &MI, Register Reg,
-                       const MachineOperand &Def) {
-  const unsigned DefIndex = Def.getOperandNo();
-  for (unsigned I = 0, E = MI.getNumOperands(); I != E; ++I) {
-    const MachineOperand &MO = MI.getOperand(I);
-    if (!MO.isReg() || !MO.isUse() || MO.getReg() != Reg)
-      continue;
-    if (!isPermittedPreservingUse(MI, I, DefIndex))
-      return true;
-  }
-  return false;
-}
-
 std::optional<RewriteCandidate> AIEEpilogueRegRewriter::collectCandidate(
     Register Reg, MachineBasicBlock &Epilogue, MachineRegisterInfo &MRI,
     const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM, LiveIntervals &LIS) const {
+  if (!Reg.isVirtual() || !LIS.hasInterval(Reg) || !VRM.hasPhys(Reg))
+    return std::nullopt;
+
   const TargetRegisterClass *RC = MRI.getRegClass(Reg);
   if (!TRI.isVecOrAccRegClass(*RC))
     return std::nullopt;
 
-  if (!LIS.hasInterval(Reg) || !VRM.hasPhys(Reg))
-    return std::nullopt;
+  LLVM_DEBUG(dbgs() << "Epilogue register rewrite: inspect "
+                    << printReg(Reg, &TRI, 0, &MRI) << " in "
+                    << Epilogue.getFullName() << '\n');
 
-  const SmallSet<int, 8> CoveringSubRegs = TRI.getCoveringSubRegs(*RC);
-  if (CoveringSubRegs.empty())
-    return std::nullopt;
-
-  SmallSet<int, 8> DefinedSubRegs;
   SmallVector<MachineOperand *, 4> Defs;
-  bool Collecting = false;
-
-  for (MachineInstr &MI : Epilogue) {
-    SmallVector<MachineOperand *, 2> PartialDefs = getPartialDefs(MI, Reg);
-    if (!Collecting) {
-      if (PartialDefs.size() != 1 || !PartialDefs.front()->isUndef())
-        continue;
-      Collecting = true;
-    } else if (PartialDefs.empty()) {
-      for (const MachineOperand &MO : MI.operands())
-        if (MO.isReg() && MO.isUse() && MO.getReg() == Reg)
-          return std::nullopt;
+  SlotIndex FirstDefIndex;
+  for (MachineOperand &Def : MRI.def_operands(Reg)) {
+    if (Def.getParent()->getParent() != &Epilogue)
       continue;
-    }
-
-    if (PartialDefs.size() != 1)
-      return std::nullopt;
-
-    MachineOperand &Def = *PartialDefs.front();
-    const int SubReg = Def.getSubReg();
-    if (!CoveringSubRegs.count(SubReg) || DefinedSubRegs.count(SubReg))
-      return std::nullopt;
-    if (hasIndependentUse(MI, Reg, Def))
-      return std::nullopt;
-
-    DefinedSubRegs.insert(SubReg);
     Defs.push_back(&Def);
-    if (DefinedSubRegs == CoveringSubRegs)
-      return RewriteCandidate{Reg, static_cast<MCPhysReg>(VRM.getPhys(Reg)),
-                              RC,  std::move(Defs),
-                              &MI, &Epilogue};
+    const SlotIndex DefIndex = LIS.getInstructionIndex(*Def.getParent());
+    if (!FirstDefIndex.isValid() || DefIndex < FirstDefIndex)
+      FirstDefIndex = DefIndex;
+  }
+  if (Defs.empty()) {
+    LLVM_DEBUG(dbgs() << "  reject: no epilogue definitions\n");
+    return std::nullopt;
   }
 
-  return std::nullopt;
+  // Only the def operands get renamed, and the repair copy is inserted at
+  // the epilogue end, so an epilogue use observes the old register value as
+  // long as it happens strictly before the first rewritten def: it is
+  // reading the prior generation of Reg, which is untouched by the rewrite.
+  // A use at or after the first def could instead observe a partially
+  // rewritten (or fully renamed) register, so it must block the rewrite.
+  // Uses outside the epilogue are unaffected by the repair copy and are
+  // therefore allowed regardless of position.
+  for (MachineOperand &Use : MRI.use_operands(Reg)) {
+    MachineInstr *UseMI = Use.getParent();
+    if (UseMI->isDebugInstr())
+      continue;
+    if (UseMI->getParent() != &Epilogue) {
+      LLVM_DEBUG(dbgs() << "  allow: non-debug use outside the epilogue in "
+                        << UseMI->getParent()->getFullName() << '\n');
+      continue;
+    }
+    const SlotIndex UseIndex = LIS.getInstructionIndex(*UseMI);
+    if (UseIndex >= FirstDefIndex) {
+      LLVM_DEBUG({
+        dbgs() << "  reject: non-debug epilogue use at or after the first "
+                  "rewritten def in ";
+        UseMI->print(dbgs());
+      });
+      return std::nullopt;
+    }
+    LLVM_DEBUG(dbgs() << "  allow: non-debug epilogue use before the first "
+                         "rewritten def in "
+                      << Epilogue.getFullName() << '\n');
+  }
+
+  LLVM_DEBUG(dbgs() << "  accept: " << Defs.size()
+                    << " epilogue definition(s), old physical register "
+                    << printReg(VRM.getPhys(Reg), &TRI) << '\n');
+  return RewriteCandidate{Reg, static_cast<MCPhysReg>(VRM.getPhys(Reg)), RC,
+                          std::move(Defs), &Epilogue};
 }
 
 SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
@@ -190,24 +173,54 @@ SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
     if (!Epilogue)
       continue;
 
-    SmallSetVector<Register, 16> LoopRegs;
-    DenseMap<Register, std::pair<bool, bool>> LoopDefUse;
+    LLVM_DEBUG(dbgs() << "Epilogue register rewrite: loop "
+                      << Loop->getFullName() << ", epilogue "
+                      << Epilogue->getFullName() << '\n');
+
+    SmallSet<MCPhysReg, 16> LoopUsedPhysRegs;
     for (MachineInstr &MI : *Loop) {
-      for (MachineOperand &MO : MI.operands()) {
-        if (!MO.isReg() || !MO.getReg().isVirtual())
+      for (const MachineOperand &MO : MI.operands()) {
+        if (!MO.isReg() || !MO.isUse() || !MO.getReg())
           continue;
+
         Register Reg = MO.getReg();
-        LoopRegs.insert(Reg);
-        auto &DefUse = LoopDefUse[Reg];
-        DefUse.first |= MO.isDef();
-        DefUse.second |= MO.isUse();
+        if (Reg.isPhysical())
+          LoopUsedPhysRegs.insert(Reg.asMCReg());
+        else if (VRM.hasPhys(Reg))
+          LoopUsedPhysRegs.insert(VRM.getPhys(Reg));
       }
     }
 
-    for (Register Reg : LoopRegs) {
-      const auto [HasDef, HasUse] = LoopDefUse.lookup(Reg);
-      if (!HasDef || !HasUse)
+    SmallSetVector<Register, 16> EpilogueDefRegs;
+    for (MachineInstr &MI : *Epilogue) {
+      for (const MachineOperand &MO : MI.operands()) {
+        if (MO.isReg() && MO.isDef() && MO.getReg().isVirtual())
+          EpilogueDefRegs.insert(MO.getReg());
+      }
+    }
+
+    for (Register Reg : EpilogueDefRegs) {
+      if (!VRM.hasPhys(Reg)) {
+        LLVM_DEBUG(dbgs() << "  skip " << printReg(Reg, &TRI, 0, &MRI)
+                          << ": no assigned physical register\n");
         continue;
+      }
+
+      const MCPhysReg CandidatePhys = VRM.getPhys(Reg);
+      bool UsedInLoop = false;
+      for (MCPhysReg LoopPhys : LoopUsedPhysRegs) {
+        if (TRI.regsOverlap(CandidatePhys, LoopPhys)) {
+          UsedInLoop = true;
+          break;
+        }
+      }
+      if (!UsedInLoop) {
+        LLVM_DEBUG(dbgs() << "  skip " << printReg(Reg, &TRI, 0, &MRI) << " ("
+                          << printReg(CandidatePhys, &TRI)
+                          << "): physical register is not used in the loop\n");
+        continue;
+      }
+
       if (auto Candidate = collectCandidate(Reg, *Epilogue, MRI, TRI, VRM, LIS))
         Candidates.push_back(std::move(*Candidate));
     }
@@ -215,8 +228,17 @@ SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
 
   llvm::stable_sort(Candidates, [&](const RewriteCandidate &Left,
                                     const RewriteCandidate &Right) {
-    return Indexes.getInstructionIndex(*Left.Defs.front()->getParent()) <
-           Indexes.getInstructionIndex(*Right.Defs.front()->getParent());
+    auto FirstDefIndex = [&](const RewriteCandidate &Candidate) {
+      SlotIndex First =
+          Indexes.getInstructionIndex(*Candidate.Defs.front()->getParent());
+      for (MachineOperand *Def : Candidate.Defs) {
+        const SlotIndex Index = Indexes.getInstructionIndex(*Def->getParent());
+        if (Index < First)
+          First = Index;
+      }
+      return First;
+    };
+    return FirstDefIndex(Left) < FirstDefIndex(Right);
   });
   return Candidates;
 }
@@ -234,12 +256,6 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
                                    .getRegSlot(Def->isEarlyClobber());
     if (!FirstDef.isValid() || DefIndex < FirstDef)
       FirstDef = DefIndex;
-
-    LaneBitmask LaneMask = TRI.getSubRegIndexLaneMask(Def->getSubReg());
-    LiveInterval::SubRange *SubRange =
-        ProspectiveLI.createSubRange(LIS.getVNInfoAllocator(), LaneMask);
-    VNInfo *Value = SubRange->getNextValue(DefIndex, LIS.getVNInfoAllocator());
-    SubRange->addSegment(LiveRange::Segment(DefIndex, Boundary, Value));
   }
   VNInfo *MainValue =
       ProspectiveLI.getNextValue(FirstDef, LIS.getVNInfoAllocator());
@@ -249,6 +265,10 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
   MCPhysReg NewPhys = AIERegAllocationUtils::findFreeNonOverlappingPhysReg(
       ProspectiveLI, *Candidate.RC, Candidate.RC->getRegisters(),
       Candidate.OldPhys, ReservedRegUnits, TRI, LRM);
+  LLVM_DEBUG(dbgs() << "Epilogue register rewrite: replacement for "
+                    << printReg(Candidate.OldReg, &TRI) << " ("
+                    << printReg(Candidate.OldPhys, &TRI) << ") is "
+                    << printReg(NewPhys, &TRI) << '\n');
   return NewPhys;
 }
 
@@ -263,11 +283,15 @@ void AIEEpilogueRegRewriter::commitRewrite(
 
   MachineInstr *Copy =
       BuildMI(*Candidate.Epilogue, Candidate.Epilogue->getFirstTerminator(),
-              Candidate.FinalDef->getDebugLoc(), TII.get(TargetOpcode::COPY),
-              Candidate.OldReg)
+              DebugLoc(), TII.get(TargetOpcode::COPY), Candidate.OldReg)
           .addReg(NewReg)
           .getInstr();
   LIS.InsertMachineInstrInMaps(*Copy);
+  LLVM_DEBUG(
+      dbgs() << "Epilogue register rewrite: rewrite "
+             << printReg(Candidate.OldReg, MRI.getTargetRegisterInfo(), 0, &MRI)
+             << " to " << printReg(NewReg, MRI.getTargetRegisterInfo(), 0, &MRI)
+             << " in " << Candidate.Epilogue->getFullName() << '\n');
 
   SmallSet<Register, 8> RegistersToRepair;
   RegistersToRepair.insert(Candidate.OldReg);
@@ -303,27 +327,44 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
 
   SmallVector<RewriteCandidate, 4> Candidates =
       collectCandidates(MF, MRI, TRI, VRM, LIS, Indexes);
-  if (Candidates.empty())
+  if (Candidates.empty()) {
+    LLVM_DEBUG(dbgs() << "Epilogue register rewrite: no candidates in "
+                      << MF.getName() << '\n');
     return false;
+  }
 
+  LLVM_DEBUG(dbgs() << "Epilogue register rewrite: " << Candidates.size()
+                    << " candidate(s) in " << MF.getName() << '\n');
   BitVector ReservedRegUnits(TRI.getNumRegUnits());
   DenseMap<MachineBasicBlock *, unsigned> SpentBudget;
   bool Changed = false;
 
   for (RewriteCandidate &Candidate : Candidates) {
     unsigned &Spent = SpentBudget[Candidate.Epilogue];
-    if (Spent >= EpilogueCopyBudget)
+    if (Spent >= EpilogueCopyBudget) {
+      LLVM_DEBUG(dbgs() << "  skip "
+                        << printReg(Candidate.OldReg, &TRI, 0, &MRI)
+                        << ": epilogue copy budget exhausted\n");
       continue;
+    }
 
     MCPhysReg NewPhys = findReplacementPhysReg(Candidate, TRI, LIS, LRM,
                                                Indexes, ReservedRegUnits);
-    if (!NewPhys)
+    if (!NewPhys) {
+      LLVM_DEBUG(dbgs() << "  skip "
+                        << printReg(Candidate.OldReg, &TRI, 0, &MRI)
+                        << ": no free non-overlapping physical register\n");
       continue;
+    }
 
     const std::optional<unsigned> CopyCost =
         TII.getCopyCost(TRI, Candidate.OldPhys, NewPhys);
-    if (!CopyCost || *CopyCost > EpilogueCopyBudget - Spent)
+    if (!CopyCost || *CopyCost > EpilogueCopyBudget - Spent) {
+      LLVM_DEBUG(dbgs() << "  skip "
+                        << printReg(Candidate.OldReg, &TRI, 0, &MRI)
+                        << ": copy cost does not fit the remaining budget\n");
       continue;
+    }
 
     for (MCRegUnit Unit : TRI.regunits(NewPhys))
       ReservedRegUnits.set(Unit);
