@@ -16,7 +16,6 @@
 #include "Utils/AIERegAllocationUtils.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/LiveDebugVariables.h"
@@ -45,6 +44,7 @@ struct RewriteCandidate {
   MCPhysReg OldPhys;
   const TargetRegisterClass *RC;
   SmallVector<MachineOperand *, 4> Defs;
+  MachineOperand *FirstDef;
   MachineBasicBlock *Epilogue;
 };
 
@@ -104,61 +104,42 @@ std::optional<RewriteCandidate> AIEEpilogueRegRewriter::collectCandidate(
   if (!TRI.isVecOrAccRegClass(*RC))
     return std::nullopt;
 
-  LLVM_DEBUG(dbgs() << "Epilogue register rewrite: inspect "
-                    << printReg(Reg, &TRI, 0, &MRI) << " in "
-                    << Epilogue.getFullName() << '\n');
-
   SmallVector<MachineOperand *, 4> Defs;
-  SlotIndex FirstDefIndex;
-  for (MachineOperand &Def : MRI.def_operands(Reg)) {
-    if (Def.getParent()->getParent() != &Epilogue)
+  SmallVector<MachineOperand *, 4> EpilogueUses;
+  MachineOperand *FirstDef = nullptr;
+  for (MachineOperand &MO : MRI.reg_nodbg_operands(Reg)) {
+    if (MO.getParent()->getParent() != &Epilogue)
       continue;
-    Defs.push_back(&Def);
-    const SlotIndex DefIndex = LIS.getInstructionIndex(*Def.getParent());
-    if (!FirstDefIndex.isValid() || DefIndex < FirstDefIndex)
-      FirstDefIndex = DefIndex;
+
+    if (MO.isDef()) {
+      if (!FirstDef || LIS.getInstructionIndex(*MO.getParent()) <
+                           LIS.getInstructionIndex(*FirstDef->getParent()))
+        FirstDef = &MO;
+      Defs.push_back(&MO);
+    } else if (MO.isUse()) {
+      EpilogueUses.push_back(&MO);
+    }
   }
-  if (Defs.empty()) {
-    LLVM_DEBUG(dbgs() << "  reject: no epilogue definitions\n");
+  if (Defs.empty())
     return std::nullopt;
-  }
 
   // Only the def operands get renamed, and the repair copy is inserted at
-  // the epilogue end, so an epilogue use observes the old register value as
-  // long as it happens strictly before the first rewritten def: it is
-  // reading the prior generation of Reg, which is untouched by the rewrite.
-  // A use at or after the first def could instead observe a partially
-  // rewritten (or fully renamed) register, so it must block the rewrite.
-  // Uses outside the epilogue are unaffected by the repair copy and are
-  // therefore allowed regardless of position.
-  for (MachineOperand &Use : MRI.use_operands(Reg)) {
-    MachineInstr *UseMI = Use.getParent();
-    if (UseMI->isDebugInstr())
-      continue;
-    if (UseMI->getParent() != &Epilogue) {
-      LLVM_DEBUG(dbgs() << "  allow: non-debug use outside the epilogue in "
-                        << UseMI->getParent()->getFullName() << '\n');
-      continue;
-    }
-    const SlotIndex UseIndex = LIS.getInstructionIndex(*UseMI);
-    if (UseIndex >= FirstDefIndex) {
-      LLVM_DEBUG({
-        dbgs() << "  reject: non-debug epilogue use at or after the first "
-                  "rewritten def in ";
-        UseMI->print(dbgs());
-      });
+  // the epilogue end, so a use at or after the first rewritten def would
+  // observe a partially rewritten (or fully renamed) register.
+  const SlotIndex FirstDefIndex =
+      LIS.getInstructionIndex(*FirstDef->getParent());
+  for (MachineOperand *Use : EpilogueUses) {
+    if (LIS.getInstructionIndex(*Use->getParent()) >= FirstDefIndex)
       return std::nullopt;
-    }
-    LLVM_DEBUG(dbgs() << "  allow: non-debug epilogue use before the first "
-                         "rewritten def in "
-                      << Epilogue.getFullName() << '\n');
   }
 
-  LLVM_DEBUG(dbgs() << "  accept: " << Defs.size()
-                    << " epilogue definition(s), old physical register "
+  LLVM_DEBUG(dbgs() << "Epilogue register rewrite: target "
+                    << printReg(Reg, &TRI, 0, &MRI) << " in "
+                    << Epilogue.getFullName() << ", old physical register "
                     << printReg(VRM.getPhys(Reg), &TRI) << '\n');
-  return RewriteCandidate{Reg, static_cast<MCPhysReg>(VRM.getPhys(Reg)), RC,
-                          std::move(Defs), &Epilogue};
+  return RewriteCandidate{Reg,      static_cast<MCPhysReg>(VRM.getPhys(Reg)),
+                          RC,       std::move(Defs),
+                          FirstDef, &Epilogue};
 }
 
 SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
@@ -173,72 +154,29 @@ SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
     if (!Epilogue)
       continue;
 
-    LLVM_DEBUG(dbgs() << "Epilogue register rewrite: loop "
-                      << Loop->getFullName() << ", epilogue "
-                      << Epilogue->getFullName() << '\n');
+    SmallSet<Register, 16> SeenRegs;
+    for (MachineInstr &MI : *Epilogue) {
+      if (MI.isDebugInstr())
+        continue;
 
-    SmallSet<MCPhysReg, 16> LoopUsedPhysRegs;
-    for (MachineInstr &MI : *Loop) {
-      for (const MachineOperand &MO : MI.operands()) {
-        if (!MO.isReg() || !MO.isUse() || !MO.getReg())
+      for (const MachineOperand &Use : MI.operands()) {
+        if (!Use.isReg() || !Use.isUse() || !Use.getReg().isVirtual())
           continue;
 
-        Register Reg = MO.getReg();
-        if (Reg.isPhysical())
-          LoopUsedPhysRegs.insert(Reg.asMCReg());
-        else if (VRM.hasPhys(Reg))
-          LoopUsedPhysRegs.insert(VRM.getPhys(Reg));
+        Register Reg = Use.getReg();
+        if (!SeenRegs.insert(Reg).second)
+          continue;
+        if (auto Candidate =
+                collectCandidate(Reg, *Epilogue, MRI, TRI, VRM, LIS))
+          Candidates.push_back(std::move(*Candidate));
       }
-    }
-
-    SmallSetVector<Register, 16> EpilogueDefRegs;
-    for (MachineInstr &MI : *Epilogue) {
-      for (const MachineOperand &MO : MI.operands()) {
-        if (MO.isReg() && MO.isDef() && MO.getReg().isVirtual())
-          EpilogueDefRegs.insert(MO.getReg());
-      }
-    }
-
-    for (Register Reg : EpilogueDefRegs) {
-      if (!VRM.hasPhys(Reg)) {
-        LLVM_DEBUG(dbgs() << "  skip " << printReg(Reg, &TRI, 0, &MRI)
-                          << ": no assigned physical register\n");
-        continue;
-      }
-
-      const MCPhysReg CandidatePhys = VRM.getPhys(Reg);
-      bool UsedInLoop = false;
-      for (MCPhysReg LoopPhys : LoopUsedPhysRegs) {
-        if (TRI.regsOverlap(CandidatePhys, LoopPhys)) {
-          UsedInLoop = true;
-          break;
-        }
-      }
-      if (!UsedInLoop) {
-        LLVM_DEBUG(dbgs() << "  skip " << printReg(Reg, &TRI, 0, &MRI) << " ("
-                          << printReg(CandidatePhys, &TRI)
-                          << "): physical register is not used in the loop\n");
-        continue;
-      }
-
-      if (auto Candidate = collectCandidate(Reg, *Epilogue, MRI, TRI, VRM, LIS))
-        Candidates.push_back(std::move(*Candidate));
     }
   }
 
   llvm::stable_sort(Candidates, [&](const RewriteCandidate &Left,
                                     const RewriteCandidate &Right) {
-    auto FirstDefIndex = [&](const RewriteCandidate &Candidate) {
-      SlotIndex First =
-          Indexes.getInstructionIndex(*Candidate.Defs.front()->getParent());
-      for (MachineOperand *Def : Candidate.Defs) {
-        const SlotIndex Index = Indexes.getInstructionIndex(*Def->getParent());
-        if (Index < First)
-          First = Index;
-      }
-      return First;
-    };
-    return FirstDefIndex(Left) < FirstDefIndex(Right);
+    return Indexes.getInstructionIndex(*Left.FirstDef->getParent()) <
+           Indexes.getInstructionIndex(*Right.FirstDef->getParent());
   });
   return Candidates;
 }
@@ -249,13 +187,17 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
     BitVector &ReservedRegUnits) const {
   const SlotIndex Boundary = Indexes.getMBBEndIdx(Candidate.Epilogue);
   LiveInterval ProspectiveLI(Candidate.OldReg, 0.0F);
-  SlotIndex FirstDef;
-
+  const SlotIndex FirstDef =
+      LIS.getInstructionIndex(*Candidate.FirstDef->getParent())
+          .getRegSlot(Candidate.FirstDef->isEarlyClobber());
   for (MachineOperand *Def : Candidate.Defs) {
     const SlotIndex DefIndex = LIS.getInstructionIndex(*Def->getParent())
                                    .getRegSlot(Def->isEarlyClobber());
-    if (!FirstDef.isValid() || DefIndex < FirstDef)
-      FirstDef = DefIndex;
+    const LaneBitmask LaneMask = TRI.getSubRegIndexLaneMask(Def->getSubReg());
+    LiveInterval::SubRange *SubRange =
+        ProspectiveLI.createSubRange(LIS.getVNInfoAllocator(), LaneMask);
+    VNInfo *Value = SubRange->getNextValue(DefIndex, LIS.getVNInfoAllocator());
+    SubRange->addSegment(LiveRange::Segment(DefIndex, Boundary, Value));
   }
   VNInfo *MainValue =
       ProspectiveLI.getNextValue(FirstDef, LIS.getVNInfoAllocator());
