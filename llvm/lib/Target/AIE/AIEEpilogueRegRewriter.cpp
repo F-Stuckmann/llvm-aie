@@ -123,9 +123,8 @@ std::optional<RewriteCandidate> AIEEpilogueRegRewriter::collectCandidate(
                       LIS.getInstructionIndex(*Right->getParent());
              });
 
-  // Only the def operands get renamed, and the repair copy is inserted at
-  // the epilogue end, so a use at or after the first rewritten def would
-  // observe a partially rewritten (or fully renamed) register.
+  // Only defs get renamed and the repair copy lands at the epilogue end, so a
+  // use at or after the first rewritten def would see a partially renamed reg.
   const SlotIndex FirstDefIndex =
       LIS.getInstructionIndex(*Defs.front()->getParent());
   for (MachineOperand *Use : EpilogueUses) {
@@ -187,10 +186,8 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
   const SlotIndex FirstDef = LIS.getInstructionIndex(*FirstDefMO->getParent())
                                  .getRegSlot(FirstDefMO->isEarlyClobber());
 
-  // The renamed defs are all live from the first def to the repair copy at
-  // the epilogue end, so a single [FirstDef, Boundary] segment is the tightest
-  // range for the availability check; LiveRegMatrix interference only consults
-  // the main range, so per-def subranges cannot change the result.
+  // Defs live as one range up to the repair copy, and interference only
+  // consults the main range, so per-def subranges cannot change the result.
   LiveInterval ProspectiveLI(Candidate.OldReg, 0.0F);
   VNInfo *MainValue =
       ProspectiveLI.getNextValue(FirstDef, LIS.getVNInfoAllocator());
