@@ -41,10 +41,8 @@ namespace {
 
 struct RewriteCandidate {
   Register OldReg;
-  MCPhysReg OldPhys;
-  const TargetRegisterClass *RC;
+  // Sorted by def slot index, so Defs.front() is the first epilogue def.
   SmallVector<MachineOperand *, 4> Defs;
-  MachineOperand *FirstDef;
   MachineBasicBlock *Epilogue;
 };
 
@@ -80,12 +78,13 @@ private:
   SmallVector<RewriteCandidate, 4>
   collectCandidates(MachineFunction &MF, MachineRegisterInfo &MRI,
                     const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM,
-                    LiveIntervals &LIS, SlotIndexes &Indexes) const;
+                    LiveIntervals &LIS) const;
 
   MCPhysReg findReplacementPhysReg(const RewriteCandidate &Candidate,
+                                   MachineRegisterInfo &MRI,
                                    const AIEBaseRegisterInfo &TRI,
-                                   LiveIntervals &LIS, LiveRegMatrix &LRM,
-                                   SlotIndexes &Indexes,
+                                   VirtRegMap &VRM, LiveIntervals &LIS,
+                                   LiveRegMatrix &LRM,
                                    BitVector &ReservedRegUnits) const;
 
   void commitRewrite(RewriteCandidate &Candidate, MCPhysReg NewPhys,
@@ -106,28 +105,29 @@ std::optional<RewriteCandidate> AIEEpilogueRegRewriter::collectCandidate(
 
   SmallVector<MachineOperand *, 4> Defs;
   SmallVector<MachineOperand *, 4> EpilogueUses;
-  MachineOperand *FirstDef = nullptr;
   for (MachineOperand &MO : MRI.reg_nodbg_operands(Reg)) {
     if (MO.getParent()->getParent() != &Epilogue)
       continue;
 
-    if (MO.isDef()) {
-      if (!FirstDef || LIS.getInstructionIndex(*MO.getParent()) <
-                           LIS.getInstructionIndex(*FirstDef->getParent()))
-        FirstDef = &MO;
+    if (MO.isDef())
       Defs.push_back(&MO);
-    } else if (MO.isUse()) {
+    else if (MO.isUse())
       EpilogueUses.push_back(&MO);
-    }
   }
   if (Defs.empty())
     return std::nullopt;
+
+  llvm::sort(Defs,
+             [&](const MachineOperand *Left, const MachineOperand *Right) {
+               return LIS.getInstructionIndex(*Left->getParent()) <
+                      LIS.getInstructionIndex(*Right->getParent());
+             });
 
   // Only the def operands get renamed, and the repair copy is inserted at
   // the epilogue end, so a use at or after the first rewritten def would
   // observe a partially rewritten (or fully renamed) register.
   const SlotIndex FirstDefIndex =
-      LIS.getInstructionIndex(*FirstDef->getParent());
+      LIS.getInstructionIndex(*Defs.front()->getParent());
   for (MachineOperand *Use : EpilogueUses) {
     if (LIS.getInstructionIndex(*Use->getParent()) >= FirstDefIndex)
       return std::nullopt;
@@ -137,15 +137,12 @@ std::optional<RewriteCandidate> AIEEpilogueRegRewriter::collectCandidate(
                     << printReg(Reg, &TRI, 0, &MRI) << " in "
                     << Epilogue.getFullName() << ", old physical register "
                     << printReg(VRM.getPhys(Reg), &TRI) << '\n');
-  return RewriteCandidate{Reg,      static_cast<MCPhysReg>(VRM.getPhys(Reg)),
-                          RC,       std::move(Defs),
-                          FirstDef, &Epilogue};
+  return RewriteCandidate{Reg, std::move(Defs), &Epilogue};
 }
 
 SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
     MachineFunction &MF, MachineRegisterInfo &MRI,
-    const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM, LiveIntervals &LIS,
-    SlotIndexes &Indexes) const {
+    const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM, LiveIntervals &LIS) const {
   SmallVector<RewriteCandidate, 4> Candidates;
 
   for (MachineBasicBlock *Loop : AIELoopUtils::getSingleBlockLoopMBBs(MF)) {
@@ -175,41 +172,39 @@ SmallVector<RewriteCandidate, 4> AIEEpilogueRegRewriter::collectCandidates(
 
   llvm::stable_sort(Candidates, [&](const RewriteCandidate &Left,
                                     const RewriteCandidate &Right) {
-    return Indexes.getInstructionIndex(*Left.FirstDef->getParent()) <
-           Indexes.getInstructionIndex(*Right.FirstDef->getParent());
+    return LIS.getInstructionIndex(*Left.Defs.front()->getParent()) <
+           LIS.getInstructionIndex(*Right.Defs.front()->getParent());
   });
   return Candidates;
 }
 
 MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
-    const RewriteCandidate &Candidate, const AIEBaseRegisterInfo &TRI,
-    LiveIntervals &LIS, LiveRegMatrix &LRM, SlotIndexes &Indexes,
-    BitVector &ReservedRegUnits) const {
-  const SlotIndex Boundary = Indexes.getMBBEndIdx(Candidate.Epilogue);
+    const RewriteCandidate &Candidate, MachineRegisterInfo &MRI,
+    const AIEBaseRegisterInfo &TRI, VirtRegMap &VRM, LiveIntervals &LIS,
+    LiveRegMatrix &LRM, BitVector &ReservedRegUnits) const {
+  const SlotIndex Boundary = LIS.getMBBEndIdx(Candidate.Epilogue);
+  const MachineOperand *FirstDefMO = Candidate.Defs.front();
+  const SlotIndex FirstDef = LIS.getInstructionIndex(*FirstDefMO->getParent())
+                                 .getRegSlot(FirstDefMO->isEarlyClobber());
+
+  // The renamed defs are all live from the first def to the repair copy at
+  // the epilogue end, so a single [FirstDef, Boundary] segment is the tightest
+  // range for the availability check; LiveRegMatrix interference only consults
+  // the main range, so per-def subranges cannot change the result.
   LiveInterval ProspectiveLI(Candidate.OldReg, 0.0F);
-  const SlotIndex FirstDef =
-      LIS.getInstructionIndex(*Candidate.FirstDef->getParent())
-          .getRegSlot(Candidate.FirstDef->isEarlyClobber());
-  for (MachineOperand *Def : Candidate.Defs) {
-    const SlotIndex DefIndex = LIS.getInstructionIndex(*Def->getParent())
-                                   .getRegSlot(Def->isEarlyClobber());
-    const LaneBitmask LaneMask = TRI.getSubRegIndexLaneMask(Def->getSubReg());
-    LiveInterval::SubRange *SubRange =
-        ProspectiveLI.createSubRange(LIS.getVNInfoAllocator(), LaneMask);
-    VNInfo *Value = SubRange->getNextValue(DefIndex, LIS.getVNInfoAllocator());
-    SubRange->addSegment(LiveRange::Segment(DefIndex, Boundary, Value));
-  }
   VNInfo *MainValue =
       ProspectiveLI.getNextValue(FirstDef, LIS.getVNInfoAllocator());
   ProspectiveLI.addSegment(LiveRange::Segment(FirstDef, Boundary, MainValue));
 
   LRM.invalidateVirtRegs();
+  const TargetRegisterClass *RC = MRI.getRegClass(Candidate.OldReg);
+  const MCPhysReg OldPhys = VRM.getPhys(Candidate.OldReg);
   MCPhysReg NewPhys = AIERegAllocationUtils::findFreeNonOverlappingPhysReg(
-      ProspectiveLI, *Candidate.RC, Candidate.RC->getRegisters(),
-      Candidate.OldPhys, ReservedRegUnits, TRI, LRM);
+      ProspectiveLI, *RC, RC->getRegisters(), OldPhys, ReservedRegUnits, TRI,
+      LRM);
   LLVM_DEBUG(dbgs() << "Epilogue register rewrite: replacement for "
                     << printReg(Candidate.OldReg, &TRI) << " ("
-                    << printReg(Candidate.OldPhys, &TRI) << ") is "
+                    << printReg(OldPhys, &TRI) << ") is "
                     << printReg(NewPhys, &TRI) << '\n');
   return NewPhys;
 }
@@ -242,8 +237,8 @@ void AIEEpilogueRegRewriter::commitRewrite(
   LiveInterval &NewLI = LIS.createAndComputeVirtRegInterval(NewReg);
   LIS.shrinkToUses(&NewLI);
 
-#ifndef NDEBUG
   LRM.invalidateVirtRegs();
+#ifndef NDEBUG
   assert(LRM.checkInterference(NewLI, NewPhys) == LiveRegMatrix::IK_Free &&
          "Prevalidated physical register became unavailable");
 #endif
@@ -261,14 +256,13 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
   const auto &TII =
       *static_cast<const AIEBaseInstrInfo *>(MF.getSubtarget().getInstrInfo());
   VirtRegMap &VRM = getAnalysis<VirtRegMapWrapperLegacy>().getVRM();
-  SlotIndexes &Indexes = getAnalysis<SlotIndexesWrapperPass>().getSI();
   LiveIntervals &LIS = getAnalysis<LiveIntervalsWrapperPass>().getLIS();
   LiveRegMatrix &LRM = getAnalysis<LiveRegMatrixWrapperLegacy>().getLRM();
   LiveDebugVariables &DebugVars =
       getAnalysis<LiveDebugVariablesWrapperLegacy>().getLDV();
 
   SmallVector<RewriteCandidate, 4> Candidates =
-      collectCandidates(MF, MRI, TRI, VRM, LIS, Indexes);
+      collectCandidates(MF, MRI, TRI, VRM, LIS);
   if (Candidates.empty()) {
     LLVM_DEBUG(dbgs() << "Epilogue register rewrite: no candidates in "
                       << MF.getName() << '\n');
@@ -290,8 +284,8 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
       continue;
     }
 
-    MCPhysReg NewPhys = findReplacementPhysReg(Candidate, TRI, LIS, LRM,
-                                               Indexes, ReservedRegUnits);
+    MCPhysReg NewPhys = findReplacementPhysReg(Candidate, MRI, TRI, VRM, LIS,
+                                               LRM, ReservedRegUnits);
     if (!NewPhys) {
       LLVM_DEBUG(dbgs() << "  skip "
                         << printReg(Candidate.OldReg, &TRI, 0, &MRI)
@@ -300,7 +294,7 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
     }
 
     const std::optional<unsigned> CopyCost =
-        TII.getCopyCost(TRI, Candidate.OldPhys, NewPhys);
+        TII.getCopyCost(TRI, VRM.getPhys(Candidate.OldReg), NewPhys);
     if (!CopyCost || *CopyCost > EpilogueCopyBudget - Spent) {
       LLVM_DEBUG(dbgs() << "  skip "
                         << printReg(Candidate.OldReg, &TRI, 0, &MRI)
