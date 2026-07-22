@@ -309,9 +309,7 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
                     << " candidate(s) in " << MF.getName() << '\n');
   const RegisterBank *ModBank = nullptr;
   if (const RegisterBankInfo *RBI = MF.getSubtarget().getRegBankInfo())
-    for (unsigned I = 0, E = RBI->getNumRegBanks(); I != E; ++I)
-      if (StringRef(RBI->getRegBank(I).getName()) == "MODRegBank")
-        ModBank = &RBI->getRegBank(I);
+    ModBank = &RBI->getRegBank(TRI.getMODRegBankID());
 
   BitVector ReservedRegUnits(TRI.getNumRegUnits());
   DenseMap<MachineBasicBlock *, unsigned> SpentBudget;
