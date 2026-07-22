@@ -23,7 +23,10 @@
 #include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/RegisterBank.h"
+#include "llvm/CodeGen/RegisterBankInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
@@ -86,6 +89,14 @@ private:
                                    VirtRegMap &VRM, LiveIntervals &LIS,
                                    LiveRegMatrix &LRM,
                                    BitVector &ReservedRegUnits) const;
+
+  // Cheap estimate of whether the candidate's def stays pinned after the rename
+  // deletes its WAR anti-dependence: a def that reads an address-modifier
+  // register keeps a residual register dependency and cannot move earlier.
+  bool defReadsModifierReg(const RewriteCandidate &Candidate,
+                           MachineRegisterInfo &MRI,
+                           const AIEBaseRegisterInfo &TRI,
+                           const RegisterBank *ModBank) const;
 
   void commitRewrite(RewriteCandidate &Candidate, MCPhysReg NewPhys,
                      MachineRegisterInfo &MRI, const AIEBaseInstrInfo &TII,
@@ -206,6 +217,34 @@ MCPhysReg AIEEpilogueRegRewriter::findReplacementPhysReg(
   return NewPhys;
 }
 
+bool AIEEpilogueRegRewriter::defReadsModifierReg(
+    const RewriteCandidate &Candidate, MachineRegisterInfo &MRI,
+    const AIEBaseRegisterInfo &TRI, const RegisterBank *ModBank) const {
+  if (!ModBank)
+    return false;
+  // An address-modifier operand is a cheap proxy for a register dependency that
+  // still orders the def after the resolved WAR: the modifier is typically
+  // redefined on the far side of that dependence, so the def cannot move ahead.
+  // MODRegBank is the target-independent home of those registers.
+  // TODO: This is a coarse estimate. A more elaborate view of which values stay
+  // pinned would inspect the actual residual dependences of the def once
+  // physical registers are known (post-virtregrewriter, where the modifier
+  // reuse becomes a real anti-dependence) rather than treating every modifier
+  // read as pinning.
+  for (const MachineOperand *Def : Candidate.Defs) {
+    for (const MachineOperand &MO : Def->getParent()->uses()) {
+      if (!MO.isReg() || !MO.getReg())
+        continue;
+      const TargetRegisterClass *RC =
+          MO.getReg().isVirtual() ? MRI.getRegClass(MO.getReg())
+                                  : TRI.getMinimalPhysRegClass(MO.getReg());
+      if (RC && ModBank->covers(*RC))
+        return true;
+    }
+  }
+  return false;
+}
+
 void AIEEpilogueRegRewriter::commitRewrite(
     RewriteCandidate &Candidate, MCPhysReg NewPhys, MachineRegisterInfo &MRI,
     const AIEBaseInstrInfo &TII, VirtRegMap &VRM, LiveRegMatrix &LRM,
@@ -268,11 +307,36 @@ bool AIEEpilogueRegRewriter::runOnMachineFunction(MachineFunction &MF) {
 
   LLVM_DEBUG(dbgs() << "Epilogue register rewrite: " << Candidates.size()
                     << " candidate(s) in " << MF.getName() << '\n');
+  const RegisterBank *ModBank = nullptr;
+  if (const RegisterBankInfo *RBI = MF.getSubtarget().getRegBankInfo())
+    for (unsigned I = 0, E = RBI->getNumRegBanks(); I != E; ++I)
+      if (StringRef(RBI->getRegBank(I).getName()) == "MODRegBank")
+        ModBank = &RBI->getRegBank(I);
+
   BitVector ReservedRegUnits(TRI.getNumRegUnits());
   DenseMap<MachineBasicBlock *, unsigned> SpentBudget;
+  // Candidates are ordered by def slot, so the first candidate seen for an
+  // epilogue is its earliest rename target. If that target is pinned, its
+  // successors are pinned through the same pointer chain, so renaming them only
+  // adds dependencies; abort the whole epilogue instead.
+  // TODO: This assumes one pointer chain per epilogue. Following the actual
+  // tied-pointer chain would let independent chains be renamed separately
+  // instead of aborting every candidate once the earliest one is pinned.
+  DenseMap<MachineBasicBlock *, bool> AbortedEpilogue;
   bool Changed = false;
 
   for (RewriteCandidate &Candidate : Candidates) {
+    auto [It, FirstSeen] =
+        AbortedEpilogue.try_emplace(Candidate.Epilogue, false);
+    if (FirstSeen)
+      It->second = defReadsModifierReg(Candidate, MRI, TRI, ModBank);
+    if (It->second) {
+      LLVM_DEBUG(
+          dbgs() << "  skip " << printReg(Candidate.OldReg, &TRI, 0, &MRI)
+                 << ": earliest rename target reads a modifier register\n");
+      continue;
+    }
+
     unsigned &Spent = SpentBudget[Candidate.Epilogue];
     if (Spent >= EpilogueCopyBudget) {
       LLVM_DEBUG(dbgs() << "  skip "
