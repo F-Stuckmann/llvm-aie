@@ -172,10 +172,9 @@ TEST_F(AIEOuterLoopPipelinerTest,
   EXPECT_TRUE(HasInstructionNamed(*Stage1, "not.a.load"));
 }
 
-// Guards skip-split's contract: with skip-split enabled the pass rotates and
-// peels the loop but leaves stage 0 empty of prefetch (stage population is
-// deferred to a later pass), driven through the llvm.loop.hint metadata path.
-TEST_F(AIEOuterLoopPipelinerTest, SkipSplitLeavesStage0EmptyViaMetadata) {
+// Guards skip-split's contract through the llvm.loop.hint metadata path.
+TEST_F(AIEOuterLoopPipelinerTest,
+       SkipSplitPlacesAllCandidatesInStage0ViaMetadata) {
   LLVMContext Context;
   SMDiagnostic Error;
   std::unique_ptr<Module> M = parseAssemblyString(R"IR(
@@ -261,7 +260,6 @@ TEST_F(AIEOuterLoopPipelinerTest, SkipSplitLeavesStage0EmptyViaMetadata) {
     });
   };
   EXPECT_TRUE(HasInstructionNamed(*Stage0, "loaded"));
-  EXPECT_TRUE(HasInstructionNamed(*Stage1, "loaded"));
   const bool HasLoadPHI = any_of(Stage1->phis(), [](const PHINode &PHI) {
     return PHI.getName().starts_with("loaded");
   });
@@ -270,8 +268,8 @@ TEST_F(AIEOuterLoopPipelinerTest, SkipSplitLeavesStage0EmptyViaMetadata) {
 }
 
 // Guards that skip-split takes precedence over the other split options: even
-// with lean-stage0 and speculative also enabled, stage 0 stays empty of
-// prefetch and the last iteration is still peeled (speculative would drop it).
+// with lean-stage0 and speculative also enabled, all candidates use stage 0
+// and the last iteration is still peeled (speculative would drop it).
 TEST_F(AIEOuterLoopPipelinerTest, SkipSplitOverridesOtherSplitOptions) {
   LLVMContext Context;
   SMDiagnostic Error;
@@ -352,7 +350,7 @@ TEST_F(AIEOuterLoopPipelinerTest, SkipSplitOverridesOtherSplitOptions) {
   }
   ASSERT_NE(Stage0, nullptr);
   ASSERT_NE(Stage1, nullptr);
-  EXPECT_EQ(LastIteration, nullptr);
+  EXPECT_NE(LastIteration, nullptr);
 
   const auto HasInstructionNamed = [](const BasicBlock &BB, StringRef Name) {
     return any_of(BB, [Name](const Instruction &I) {
@@ -360,7 +358,11 @@ TEST_F(AIEOuterLoopPipelinerTest, SkipSplitOverridesOtherSplitOptions) {
     });
   };
   EXPECT_TRUE(HasInstructionNamed(*Stage0, "loaded"));
-  EXPECT_TRUE(HasInstructionNamed(*Stage1, "loaded"));
+  const bool HasLoadPHI = any_of(Stage1->phis(), [](const PHINode &PHI) {
+    return PHI.getName().starts_with("loaded");
+  });
+  EXPECT_TRUE(HasLoadPHI);
+  EXPECT_FALSE(HasInstructionNamed(*LastIteration, "loaded"));
 }
 
 } // namespace

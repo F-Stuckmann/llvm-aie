@@ -53,6 +53,10 @@
 //       |
 //   [exit]
 //
+// Skip-split mode (-aie-outer-loop-pipelining-skip-split) produces the same
+// CFG skeleton with every pipeline candidate in stage 0. It still rotates,
+// peels the last iteration, and optionally converts to a JNZD hardware loop.
+//
 //===----------------------------------------------------------------------===//
 
 #include "AIE.h"
@@ -125,6 +129,12 @@ static cl::opt<bool> LeanStage0Mode(
              "intrinsics selected for lean stage 0"),
     cl::init(false), cl::Hidden);
 
+static cl::opt<bool> SkipStageSplit(
+    "aie-outer-loop-pipelining-skip-split",
+    cl::desc("Run OLP CFG restructuring (rotate, peel last iteration, JNZD) "
+             "without splitting top-block pipeline candidates into stage 1"),
+    cl::init(false), cl::Hidden);
+
 static cl::opt<bool> EnableOuterLoopHardwareLoop(
     "aie-outer-loop-hw-loop",
     cl::desc("Convert downcounting outer loops to JNZD hardware loops after "
@@ -138,6 +148,7 @@ struct OLPOpts {
   unsigned MinTripCount;
   bool SplitStagesEnabled;
   bool UseLeanStage0;
+  bool SkipSplit;
   bool EnableSpeculativeLastIteration;
   bool UseHardwareLoop;
 
@@ -146,6 +157,7 @@ struct OLPOpts {
         MinTripCount(Overrides.get(OuterLoopPipeliningMinTripCount)),
         SplitStagesEnabled(Overrides.get(SplitStages)),
         UseLeanStage0(Overrides.get(LeanStage0Mode)),
+        SkipSplit(Overrides.get(SkipStageSplit)),
         EnableSpeculativeLastIteration(
             Overrides.hasOverride(SpeculativeLastIteration)
                 ? Overrides.get(SpeculativeLastIteration)
@@ -421,6 +433,9 @@ public:
   // chain, and its sole direct target-selected intrinsic user with the user's
   // required operand chains. All other pipeline candidates form stage 1.
   void collectLeanStage0(const TargetTransformInfo &TTI);
+
+  // Skip-split: place every top pipeline candidate in stage 0.
+  void collectStage0Only();
 
   // Delete this (now unreachable) LS's blocks.
   void removeFromCFG() const;
@@ -1011,6 +1026,15 @@ void OrigLoopStructure::collectLeanStage0(const TargetTransformInfo &TTI) {
                     << stage1Insts().size() << " stage-1 instructions\n");
 }
 
+void OrigLoopStructure::collectStage0Only() {
+  topRegion().forEachInstruction([&](Instruction *I) {
+    if (isPipelineCandidate(I))
+      Stage0Insts.push_back(I);
+  });
+  LLVM_DEBUG(dbgs() << "    Skip-split: " << stage0Insts().size()
+                    << " stage-0 instructions\n");
+}
+
 SmallVector<Instruction *, 16>
 AIEOuterLoopPipeliner::remapToClone(ArrayRef<Instruction *> Insts,
                                     const RemapTable &VMap) {
@@ -1027,6 +1051,10 @@ AIEOuterLoopPipeliner::remapToClone(ArrayRef<Instruction *> Insts,
 void AIEOuterLoopPipeliner::cloneStage0IntoPreheader(
     const OrigLoopStructure &OrigLS, CloneLoopStructure &SteadyLS,
     RemapTable &PreheaderVMap) {
+  // Always create the stage-0 top preheader block, even with an empty stage 0
+  // (skip-split): it holds the preheader-level bound/JNZD setup and is the slot
+  // a later pass fills with the prefetch chain. With no stage-0 chain it stays
+  // empty of prefetch.
   Function *F = SteadyLS.getTop()->getParent();
   BasicBlock *Preheader = SteadyLS.getPreheader();
 
@@ -1795,7 +1823,9 @@ bool AIEOuterLoopPipeliner::performTransformation(OrigLoopStructure &OrigLS,
     return Opts.SplitStagesEnabled && isStage1SplitPoint(I);
   };
 
-  if (Opts.UseLeanStage0)
+  if (Opts.SkipSplit)
+    OrigLS.collectStage0Only();
+  else if (Opts.UseLeanStage0)
     OrigLS.collectLeanStage0(*TTI);
   else
     OrigLS.collectStages(IsSplitPoint);
@@ -1806,10 +1836,11 @@ bool AIEOuterLoopPipeliner::performTransformation(OrigLoopStructure &OrigLS,
 
   // Lean stage-0 defaults to speculation, regardless of side effects in that
   // stage. Non-lean speculation still requires a side-effect-free stage-0
-  // chain.
+  // chain. Skip-split needs the peeled last-iteration region as its skeleton,
+  // so it is always non-speculative.
   const bool Stage0IsSideEffectFree = !hasSideEffects(OrigLS.stage0Insts());
   const bool UseSpeculativeLastIteration =
-      Opts.EnableSpeculativeLastIteration &&
+      !Opts.SkipSplit && Opts.EnableSpeculativeLastIteration &&
       (Opts.UseLeanStage0 || Stage0IsSideEffectFree);
 
   // Clone the LS into a steady-state copy and swap it into the original's CFG
