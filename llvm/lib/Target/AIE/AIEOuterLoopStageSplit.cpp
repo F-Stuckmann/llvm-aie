@@ -98,7 +98,7 @@ public:
     buildDAGs();
     collectRegisterCorrespondence();
     pairInstructions();
-    selectProfitableSuffixes();
+    selectProfitableRegions();
     if (Selected.empty() || !validateSelectedUses())
       return false;
 
@@ -257,13 +257,13 @@ private:
            MI.isSafeToMove(SawStore);
   }
 
-  using SuccessorEdge = std::pair<unsigned, unsigned>;
+  using DependencyEdge = std::pair<unsigned, unsigned>;
 
-  bool getStrongSuccessors(const InstructionPair &Pair, bool UseTop,
-                           SmallVectorImpl<SuccessorEdge> &Successors) const {
+  bool getSuccessors(const InstructionPair &Pair, bool UseTop,
+                     SmallVectorImpl<DependencyEdge> &Successors) const {
     const SUnit *SU = UseTop ? Pair.TopSU : Pair.LatchSU;
     for (const SDep &Dep : SU->Succs) {
-      if (Dep.isWeak() || Dep.getSUnit()->isBoundaryNode())
+      if (Dep.getSUnit()->isBoundaryNode())
         continue;
       MachineInstr *SuccMI = Dep.getSUnit()->getInstr();
       auto It = PairIndices.find(SuccMI);
@@ -283,25 +283,37 @@ private:
     if (!isMovable(*Pair.Top) || !isMovable(*Pair.Latch))
       return false;
 
-    SmallVector<SuccessorEdge, 4> TopSuccessors;
-    SmallVector<SuccessorEdge, 4> LatchSuccessors;
-    if (!getStrongSuccessors(Pair, /*UseTop=*/true, TopSuccessors) ||
-        !getStrongSuccessors(Pair, /*UseTop=*/false, LatchSuccessors) ||
+    SmallVector<DependencyEdge, 4> TopSuccessors;
+    SmallVector<DependencyEdge, 4> LatchSuccessors;
+    if (!getSuccessors(Pair, /*UseTop=*/true, TopSuccessors) ||
+        !getSuccessors(Pair, /*UseTop=*/false, LatchSuccessors) ||
         TopSuccessors != LatchSuccessors)
       return false;
-    for (const SuccessorEdge &Successor : TopSuccessors)
+    for (const DependencyEdge &Successor : TopSuccessors)
       if (!collectSuffix(Successor.first, Suffix))
         return false;
     return true;
   }
 
-  void selectProfitableSuffixes() {
+  unsigned getWorstPredecessorLatency(const InstructionPair &Pair) const {
+    const auto GetWorstLatency = [](const SUnit *SU) {
+      unsigned WorstLatency = 0;
+      for (const SDep &Dep : SU->Preds) {
+        const SUnit *PredSU = Dep.getSUnit();
+        if (!PredSU->isBoundaryNode())
+          WorstLatency =
+              std::max(WorstLatency, static_cast<unsigned>(PredSU->Latency));
+      }
+      return WorstLatency;
+    };
+    return std::max(GetWorstLatency(Pair.TopSU), GetWorstLatency(Pair.LatchSU));
+  }
+
+  void selectProfitableRegions() {
     for (unsigned Index = 0; Index < Pairs.size(); ++Index) {
       const InstructionPair &Pair = Pairs[Index];
-      unsigned Latency = std::min(Pair.TopSU->Latency, Pair.LatchSU->Latency);
-      LLVM_DEBUG(dbgs() << "Stage-split pair latency " << Latency << ": "
-                        << *Pair.Top);
-      if (Latency < LongLatencyThreshold)
+      const unsigned WorstLatency = getWorstPredecessorLatency(Pair);
+      if (WorstLatency <= LongLatencyThreshold)
         continue;
 
       DenseSet<unsigned> Suffix;

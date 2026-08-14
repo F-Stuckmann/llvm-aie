@@ -5,8 +5,8 @@
 #
 # (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
 #
-# A long-latency load moves once into each stage-1 top. Its result PHIs are
-# removed, and its newly exposed pointer operand gets a steady input PHI.
+# A shuffle with a long-latency predecessor moves into each stage-1 top while
+# its load remains in stage 0.
 #
 # RUN: llc -mtriple=aie2ps -run-pass=aie-outer-loop-stage-split \
 # RUN:     -verify-machineinstrs -o - %s | FileCheck %s
@@ -45,21 +45,21 @@ tracksRegLiveness: true
 body:             |
   ; CHECK-LABEL: name: stage0_dag_collection
   ; CHECK: bb.1.stage0.top:
-  ; CHECK:   [[TOP_INPUT:%[0-9]+]]:ep = COPY
-  ; CHECK-NOT: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK:   [[TOP_LOAD:%[0-9]+]]:vec512, [[TOP_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK:   VSRS_2x_mv_w_srs_bm_srsSign1
+  ; CHECK-NOT: VSHUFFLE_vec_shuffle_x
   ; CHECK: bb.2.steady.stage1.top:
-  ; CHECK:   [[INPUT_PHI:%[0-9]+]]:ep = PHI [[TOP_INPUT]], %bb.1, {{%[0-9]+}}, %bb.4
-  ; CHECK-NOT: :vec512 = PHI
-  ; CHECK:   [[STEADY_LOAD:%[0-9]+]]:vec512, [[STEADY_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[INPUT_PHI]], 64
-  ; CHECK:   COPY [[STEADY_LOAD]]
-  ; CHECK:   COPY [[STEADY_ADDRESS]]
-  ; CHECK: bb.4.steady.stage1.bottom.and.stage0.top:
-  ; CHECK:   [[LATCH_INPUT:%[0-9]+]]:ep = COPY
   ; CHECK-NOT: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK:   [[STEADY_SHUFFLE:%[0-9]+]]:vec512 = VSHUFFLE_vec_shuffle_x {{%[0-9]+}}, {{%[0-9]+}}, {{%[0-9]+}}
+  ; CHECK:   COPY [[STEADY_SHUFFLE]]
+  ; CHECK: bb.4.steady.stage1.bottom.and.stage0.top:
+  ; CHECK:   [[LATCH_LOAD:%[0-9]+]]:vec512, [[LATCH_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK:   VSRS_2x_mv_w_srs_bm_srsSign1
+  ; CHECK-NOT: VSHUFFLE_vec_shuffle_x
   ; CHECK: bb.5.lastiter.stage1.top:
-  ; CHECK:   [[LAST_LOAD:%[0-9]+]]:vec512, [[LAST_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[LATCH_INPUT]], 64
-  ; CHECK:   COPY [[LAST_LOAD]]
-  ; CHECK:   COPY [[LAST_ADDRESS]]
+  ; CHECK-NOT: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK:   [[LAST_SHUFFLE:%[0-9]+]]:vec512 = VSHUFFLE_vec_shuffle_x [[LATCH_LOAD]], {{%[0-9]+}}, {{%[0-9]+}}
+  ; CHECK:   COPY [[LAST_SHUFFLE]]
   bb.0.entry:
     successors: %bb.1(0x80000000)
     liveins: $p0, $p1
@@ -73,15 +73,23 @@ body:             |
 
     %2:ep = COPY %0
     %3:vec512, %4:ep = VLD_x_pstm_nrm_imm_pseudo %2, 64 :: (load (<32 x s16>))
+    %18:vec512 = IMPLICIT_DEF
+    %19:mlockid_reg = MOV_RLC_imm11_pseudo 0
+    %20:vec512 = VSHUFFLE_vec_shuffle_x %3, %18, %19
+    %24:acc512 = IMPLICIT_DEF
+    %25:es = IMPLICIT_DEF
+    %26:vec256 = VSRS_2x_mv_w_srs_bm_srsSign1 %24, %25, implicit-def dead $srsrs_of, implicit $crrnd, implicit $crsrsmode, implicit $crsat, implicit $srssign1
     PseudoJ_jump_imm %bb.2
 
   bb.2.steady.stage1.top:
     successors: %bb.3(0x80000000)
 
-    %5:vec512 = PHI %3, %bb.1, %9, %bb.4
+    %5:vec512 = PHI %20, %bb.1, %23, %bb.4
     %6:ep = PHI %4, %bb.1, %10, %bb.4
+    %27:vec256 = PHI %26, %bb.1, %44, %bb.4
     %7:vec512 = COPY %5
     %8:ep = COPY %6
+    %28:vec256 = COPY %27
     PseudoJ_jump_imm %bb.3
 
   bb.3.steady.inner:
@@ -96,6 +104,12 @@ body:             |
 
     %11:ep = COPY %17
     %9:vec512, %10:ep = VLD_x_pstm_nrm_imm_pseudo %11, 64 :: (load (<32 x s16>))
+    %21:vec512 = IMPLICIT_DEF
+    %22:mlockid_reg = MOV_RLC_imm11_pseudo 0
+    %23:vec512 = VSHUFFLE_vec_shuffle_x %9, %21, %22
+    %42:acc512 = IMPLICIT_DEF
+    %43:es = IMPLICIT_DEF
+    %44:vec256 = VSRS_2x_mv_w_srs_bm_srsSign1 %42, %43, implicit-def dead $srsrs_of, implicit $crrnd, implicit $crsrsmode, implicit $crsat, implicit $srssign1
     %12:ep_as_32bit = MOVXM_lng_cg %bb.2
     %13:er = MOV_RLC_imm11_pseudo 1
     %14:er = LoopDec %13, implicit-def $srcarry
@@ -105,8 +119,9 @@ body:             |
   bb.5.lastiter.stage1.top:
     successors: %bb.6(0x80000000)
 
-    %15:vec512 = COPY %9
+    %15:vec512 = COPY %23
     %16:ep = COPY %10
+    %45:vec256 = COPY %44
     PseudoJ_jump_imm %bb.6
 
   bb.6.lastiter.inner:
