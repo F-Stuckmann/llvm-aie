@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2023-2025 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,94 +101,103 @@ void AIEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                MachineBasicBlock::iterator MBBI,
                                const DebugLoc &DL, Register DstReg,
                                Register SrcReg, bool KillSrc,
-                               bool RenamableDest, bool RenamableSrc) const {
-  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
+                               bool /* RenamableDest */,
+                               bool /* RenamableSrc */) const {
+  const TargetRegisterInfo &TRI =
+      *MBB.getParent()->getRegInfo().getTargetRegisterInfo();
+  CopyMaterializer M(*this, TRI, MBB, MBBI, DL);
+  if (!materializeCopy(M, DstReg, SrcReg, KillSrc))
+    assert(false && "unhandled case in copyPhysReg");
+}
+
+bool AIEInstrInfo::materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                                   MCRegister SrcReg, bool KillSrc) const {
+  const TargetRegisterInfo &TRI = M.getRegisterInfo();
 
   // Generate a mov instruction
   if ((AIE::mMvSclRegClass.contains(SrcReg) &&
        AIE::mMvSclRegClass.contains(DstReg)) ||
       (AIE::PTRRegClass.contains(SrcReg) &&
        AIE::PTRRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), DstReg)
+    M.buildInstr(get(AIE::MOV), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::SPRRegClass.contains(SrcReg) &&
              AIE::GPRRegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_SPECIAL2R), DstReg)
+    M.buildInstr(get(AIE::MV_SPECIAL2R), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::GPRRegClass.contains(SrcReg) &&
              AIE::SPRRegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_R2SPECIAL), DstReg)
+    M.buildInstr(get(AIE::MV_R2SPECIAL), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::SPRRegClass.contains(SrcReg) &&
              AIE::PTRRegClass.contains(DstReg)) {
     Register GPRReg = AIE::r15;
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_SPECIAL2R), GPRReg)
+    M.buildInstr(get(AIE::MV_SPECIAL2R), GPRReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), DstReg)
+    M.buildInstr(get(AIE::MOV), DstReg)
         .addReg(GPRReg, getKillRegState(KillSrc));
   } else if (AIE::PTRRegClass.contains(SrcReg) &&
              AIE::SPRRegClass.contains(DstReg)) {
     Register GPRReg = AIE::r15;
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), GPRReg)
+    M.buildInstr(get(AIE::MOV), GPRReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_R2SPECIAL), DstReg)
+    M.buildInstr(get(AIE::MV_R2SPECIAL), DstReg)
         .addReg(GPRReg, getKillRegState(KillSrc));
   } else if (AIE::SPRRegClass.contains(SrcReg) &&
              AIE::SPRRegClass.contains(DstReg)) {
     Register GPRReg = AIE::r15;
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_SPECIAL2R), GPRReg)
+    M.buildInstr(get(AIE::MV_SPECIAL2R), GPRReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_R2SPECIAL), DstReg)
+    M.buildInstr(get(AIE::MV_R2SPECIAL), DstReg)
         .addReg(GPRReg, getKillRegState(KillSrc));
   } else if (AIE::VEC128RegClass.contains(SrcReg) &&
              AIE::VEC128RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_V), DstReg)
+    M.buildInstr(get(AIE::MV_V), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::VEC256RegClass.contains(SrcReg) &&
              AIE::VEC256RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_W), DstReg)
+    M.buildInstr(get(AIE::MV_W), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::VEC512RegClass.contains(SrcReg) &&
              AIE::VEC512RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MV_X), DstReg)
+    M.buildInstr(get(AIE::MV_X), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::VEC1024RegClass.contains(SrcReg) &&
              AIE::VEC1024RegClass.contains(DstReg)) {
     // The 1024-bit registers share their high-order bits.
     if (SrcReg == AIE::ya && DstReg == AIE::yd) {
-      BuildMI(MBB, MBBI, DL, get(AIE::MV_X), AIE::xd)
+      M.buildInstr(get(AIE::MV_X), AIE::xd)
           .addReg(AIE::xa, getKillRegState(KillSrc));
     } else if (SrcReg == AIE::yd && DstReg == AIE::ya) {
-      BuildMI(MBB, MBBI, DL, get(AIE::MV_X), AIE::xa)
+      M.buildInstr(get(AIE::MV_X), AIE::xa)
           .addReg(AIE::xd, getKillRegState(KillSrc));
     }
   } else if (AIE::GPRRegClass.contains(SrcReg) &&
              AIE::VEC256RegClass.contains(DstReg)) {
     // only for f32 type.
-    BuildMI(MBB, MBBI, DL, get(AIE::S2V_SHIFTW0_R32), DstReg)
+    M.buildInstr(get(AIE::S2V_SHIFTW0_R32), DstReg)
         .addReg(DstReg, RegState::Undef)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE::mMv0Cg20RegClass.contains(SrcReg) &&
              AIE::VEC256RegClass.contains(DstReg)) {
     // only for f32 type.  Bounce through GPR
     Register GPRReg = AIE::r15;
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), GPRReg)
+    M.buildInstr(get(AIE::MOV), GPRReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE::S2V_SHIFTW0_R32), DstReg)
+    M.buildInstr(get(AIE::S2V_SHIFTW0_R32), DstReg)
         .addReg(DstReg, RegState::Undef)
         .addReg(GPRReg, getKillRegState(KillSrc));
   } else if (AIE::VEC256RegClass.contains(SrcReg) &&
              AIE::GPRRegClass.contains(DstReg)) {
     // only for f32 type.
-    BuildMI(MBB, MBBI, DL, get(AIE::S2V_EXT_R32), DstReg)
+    M.buildInstr(get(AIE::S2V_EXT_R32), DstReg)
         .addReg(TRI.getSubReg(SrcReg, AIE::sub_128bit_lo),
                 getKillRegState(true))
         .addImm(0);
   } else if (AIE::VEC256RegClass.contains(SrcReg) &&
              AIE::PTRRegClass.contains(DstReg)) {
     // only for f32 type.
-    BuildMI(MBB, MBBI, DL, get(AIE::S2V_EXT_P32), DstReg)
+    M.buildInstr(get(AIE::S2V_EXT_P32), DstReg)
         .addReg(TRI.getSubReg(SrcReg, AIE::sub_128bit_lo),
                 getKillRegState(true))
         .addImm(0);
@@ -196,27 +205,29 @@ void AIEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
              AIE::mMv0Cg20RegClass.contains(DstReg)) {
     // only for f32 type.  Bounce through GPR
     Register GPRReg = AIE::r15;
-    BuildMI(MBB, MBBI, DL, get(AIE::S2V_EXT_R32), GPRReg)
+    M.buildInstr(get(AIE::S2V_EXT_R32), GPRReg)
         .addReg(TRI.getSubReg(SrcReg, AIE::sub_128bit_lo),
                 getKillRegState(true))
         .addImm(0);
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), DstReg)
+    M.buildInstr(get(AIE::MOV), DstReg)
         .addReg(GPRReg, getKillRegState(KillSrc));
   } else if (AIE::mCRegClass.contains(SrcReg) &&
              AIE::mCRegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), TRI.getSubReg(DstReg, AIE::sub_32_lo))
+    M.buildInstr(get(AIE::MOV), TRI.getSubReg(DstReg, AIE::sub_32_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE::sub_32_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE::MOV), TRI.getSubReg(DstReg, AIE::sub_32_hi))
+    M.buildInstr(get(AIE::MOV), TRI.getSubReg(DstReg, AIE::sub_32_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE::sub_32_hi),
                 getKillRegState(KillSrc));
   } else if (AIE::ACC384RegClass.contains(SrcReg) &&
              AIE::ACC384RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE::ACCUMULATOR_MOVE), DstReg)
+    M.buildInstr(get(AIE::ACCUMULATOR_MOVE), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else {
-    assert(false && "unhandled case in copyPhysReg");
+    return false;
   }
+
+  return true;
 }
 
 // Sometimes the instruction set encodes smaller registers (256-bit or 512-bit)

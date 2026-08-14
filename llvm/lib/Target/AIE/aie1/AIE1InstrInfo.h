@@ -46,6 +46,11 @@ public:
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
 
+protected:
+  bool materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                       MCRegister SrcReg, bool KillSrc) const override;
+
+public:
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
   void storeRegToStackSlot(MachineBasicBlock &MBB,

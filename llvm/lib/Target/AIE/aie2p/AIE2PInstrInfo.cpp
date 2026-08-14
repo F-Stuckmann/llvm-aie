@@ -653,47 +653,58 @@ void AIE2PInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator MBBI,
                                  const DebugLoc &DL, Register DstReg,
                                  Register SrcReg, bool KillSrc,
-                                 bool RenamableDest, bool RenamableSrc) const {
-  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
+                                 bool /* RenamableDest */,
+                                 bool /* RenamableSrc */) const {
+  const TargetRegisterInfo &TRI =
+      *MBB.getParent()->getRegInfo().getTargetRegisterInfo();
+  CopyMaterializer M(*this, TRI, MBB, MBBI, DL);
+  if (!materializeCopy(M, DstReg, SrcReg, KillSrc))
+    llvm_unreachable("unhandled case in copyPhysReg");
+}
+
+bool AIE2PInstrInfo::materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                                     MCRegister SrcReg, bool KillSrc) const {
+  const TargetRegisterInfo &TRI = M.getRegisterInfo();
 
   if (AIE2P::mMvSclSrcRegClass.contains(SrcReg) &&
       AIE2P::mMvSclDstRegClass.contains(DstReg)) {
     // Build MultiSlotPseudo in preference
     const unsigned MOVSclOpcode = getScalarMovOpcode(DstReg, SrcReg);
-    BuildMI(MBB, MBBI, DL, get(MOVSclOpcode), DstReg)
+    M.buildInstr(get(MOVSclOpcode), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::eLRegClass.contains(SrcReg)) &&
              (AIE2P::eLRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_scl),
-            TRI.getSubReg(DstReg, AIE2P::sub_l_even))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_scl),
+                 TRI.getSubReg(DstReg, AIE2P::sub_l_even))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_l_even),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_scl),
-            TRI.getSubReg(DstReg, AIE2P::sub_l_odd))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_scl),
+                 TRI.getSubReg(DstReg, AIE2P::sub_l_odd))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_l_odd),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::eDRegClass.contains(SrcReg)) &&
              (AIE2P::eDRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2P::eDSRegClass.contains(SrcReg)) &&
              (AIE2P::eDSRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2P::mQQsaRegClass.contains(SrcReg)) &&
              (AIE2P::mQQsaRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_q), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_q), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mWmRegClass.contains(SrcReg)) &&
              (AIE2P::mQQsmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_w_to_q), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_w_to_q), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mQQsmRegClass.contains(SrcReg)) &&
              (AIE2P::mWmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_q_to_w), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_q_to_w), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mWmRegClass.contains(SrcReg)) &&
              (AIE2P::mWmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_w), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_w), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::VEC512RegClass.contains(SrcReg) ||
               AIE2P::ACC512RegClass.contains(SrcReg) ||
@@ -701,206 +712,209 @@ void AIE2PInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
              (AIE2P::VEC512RegClass.contains(DstReg) ||
               AIE2P::ACC512RegClass.contains(DstReg) ||
               AIE2P::FIFO512RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::VEC1024RegClass.contains(SrcReg)) &&
              (AIE2P::VEC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_lo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_hi))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::ACC1024RegClass.contains(SrcReg)) &&
              (AIE2P::ACC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_cm), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_cm), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if (AIE2P::VEC1024RegClass.contains(SrcReg) &&
              AIE2P::ACC1024RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_acc_lo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_acc_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_acc_hi))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_acc_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_hi),
                 getKillRegState(KillSrc));
   } else if (AIE2P::ACC1024RegClass.contains(SrcReg) &&
              AIE2P::VEC1024RegClass.contains(DstReg)) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_lo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_acc_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_hi))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_acc_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::ACC2048RegClass.contains(SrcReg)) &&
              (AIE2P::ACC2048RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_D), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_D), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mEXmRegClass.contains(SrcReg)) &&
              (AIE2P::mEXmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_ex), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_ex), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::eEYRegClass.contains(SrcReg)) &&
              (AIE2P::eEYRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_ex),
-            TRI.getSubReg(DstReg, AIE2P::sub_bfp576_lo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_ex),
+                 TRI.getSubReg(DstReg, AIE2P::sub_bfp576_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_bfp576_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_ex),
-            TRI.getSubReg(DstReg, AIE2P::sub_bfp576_hi))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_ex),
+                 TRI.getSubReg(DstReg, AIE2P::sub_bfp576_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_bfp576_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::SPARSEVEC640RegClass.contains(SrcReg)) &&
              (AIE2P::SPARSEVEC640RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_qx), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_qx), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::SPARSEVEC1280RegClass.contains(SrcReg)) &&
              (AIE2P::SPARSEVEC1280RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_qx),
-            TRI.getSubReg(DstReg, AIE2P::sub_even_vecmask_640))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_qx),
+                 TRI.getSubReg(DstReg, AIE2P::sub_even_vecmask_640))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_even_vecmask_640),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_qx),
-            TRI.getSubReg(DstReg, AIE2P::sub_odd_vecmask_640))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_qx),
+                 TRI.getSubReg(DstReg, AIE2P::sub_odd_vecmask_640))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_odd_vecmask_640),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::mQEXsmRegClass.contains(SrcReg)) &&
              (AIE2P::mQEXsmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_qex), DstReg)
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_qex), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::eQEYsRegClass.contains(SrcReg)) &&
              (AIE2P::eQEYsRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_qex),
-            TRI.getSubReg(DstReg, AIE2P::sub_even_vecmaskexp_704))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_qex),
+                 TRI.getSubReg(DstReg, AIE2P::sub_even_vecmaskexp_704))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_even_vecmaskexp_704),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_qex),
-            TRI.getSubReg(DstReg, AIE2P::sub_odd_vecmaskexp_704))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_qex),
+                 TRI.getSubReg(DstReg, AIE2P::sub_odd_vecmaskexp_704))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_odd_vecmaskexp_704),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::FIFO1024RegClass.contains(SrcReg)) &&
              (AIE2P::FIFO1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_lo_fifo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_lo_fifo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_lo_fifo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_hi_fifo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_hi_fifo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_hi_fifo),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::VEC1024RegClass.contains(SrcReg)) &&
              (AIE2P::FIFO1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_lo_fifo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_lo_fifo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_hi_fifo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_hi_fifo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::FIFO1024RegClass.contains(SrcReg)) &&
              (AIE2P::VEC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_lo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_lo_fifo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_hi))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_hi_fifo),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::ACC1024RegClass.contains(SrcReg)) &&
              (AIE2P::FIFO1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_lo_fifo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_lo_fifo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_acc_lo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_hi_fifo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_hi_fifo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_512_acc_hi),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::FIFO1024RegClass.contains(SrcReg)) &&
              (AIE2P::ACC1024RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_acc_lo))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_acc_lo))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_lo_fifo),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::VMOV_alu_mv_mv_x),
-            TRI.getSubReg(DstReg, AIE2P::sub_512_acc_hi))
+    M.buildInstr(get(AIE2P::VMOV_alu_mv_mv_x),
+                 TRI.getSubReg(DstReg, AIE2P::sub_512_acc_hi))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_hi_fifo),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::eLRegClass.contains(SrcReg)) &&
              (AIE2P::EXPVEC64RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_el),
-            TRI.getSubReg(DstReg, AIE2P::sub_lo_exp))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_el),
+                 TRI.getSubReg(DstReg, AIE2P::sub_lo_exp))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_l_even),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_eh),
-            TRI.getSubReg(DstReg, AIE2P::sub_hi_exp))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_eh),
+                 TRI.getSubReg(DstReg, AIE2P::sub_hi_exp))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_l_odd),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::EXPVEC64RegClass.contains(SrcReg)) &&
              (AIE2P::eLRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_r),
-            TRI.getSubReg(DstReg, AIE2P::sub_l_even))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_r),
+                 TRI.getSubReg(DstReg, AIE2P::sub_l_even))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_lo_exp),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_r),
-            TRI.getSubReg(DstReg, AIE2P::sub_l_odd))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_r),
+                 TRI.getSubReg(DstReg, AIE2P::sub_l_odd))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_hi_exp),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::EXPVEC64RegClass.contains(SrcReg)) &&
              (AIE2P::EXPVEC64RegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_el),
-            TRI.getSubReg(DstReg, AIE2P::sub_lo_exp))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_el),
+                 TRI.getSubReg(DstReg, AIE2P::sub_lo_exp))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_lo_exp),
                 getKillRegState(KillSrc));
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_eh),
-            TRI.getSubReg(DstReg, AIE2P::sub_hi_exp))
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_eh),
+                 TRI.getSubReg(DstReg, AIE2P::sub_hi_exp))
         .addReg(TRI.getSubReg(SrcReg, AIE2P::sub_hi_exp),
                 getKillRegState(KillSrc));
   } else if ((AIE2P::ePSRFLdFRegClass.contains(SrcReg)) &&
              (AIE2P::ePSRFLdFRegClass.contains(DstReg))) {
-    copyThroughSubRegs(MBB, MBBI, DL, DstReg, SrcReg, KillSrc);
+    if (!copyThroughSubRegs(M, DstReg, SrcReg, KillSrc))
+      return false;
   } else if ((AIE2P::mEhmRegClass.contains(SrcReg)) &&
              (AIE2P::mEhmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_eh), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_eh), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mElmRegClass.contains(SrcReg)) &&
              (AIE2P::mElmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_el), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_el), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mElmRegClass.contains(SrcReg)) &&
              (AIE2P::mEhmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_eh), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_eh), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mEhmRegClass.contains(SrcReg)) &&
              (AIE2P::mElmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_el), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_el), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mEhmRegClass.contains(SrcReg)) &&
              (AIE2P::eRRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_r), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_eh_to_r), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::eRRegClass.contains(SrcReg)) &&
              (AIE2P::mEhmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_eh), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_eh), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::mElmRegClass.contains(SrcReg)) &&
              (AIE2P::eRRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_r), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_el_to_r), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else if ((AIE2P::eRRegClass.contains(SrcReg)) &&
              (AIE2P::mElmRegClass.contains(DstReg))) {
-    BuildMI(MBB, MBBI, DL, get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_el), DstReg)
+    M.buildInstr(get(AIE2P::MOV_alu_mv_mv_mv_e_mv_r_to_el), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
   } else {
-    llvm_unreachable("unhandled case in copyPhysReg");
+    return false;
   }
+
+  return true;
 }
 
 // Some AIE instructions like Load/Stores take compound register classes

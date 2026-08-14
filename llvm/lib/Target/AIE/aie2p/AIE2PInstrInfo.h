@@ -164,6 +164,11 @@ public:
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
 
+protected:
+  bool materializeCopy(CopyMaterializer &M, MCRegister DstReg,
+                       MCRegister SrcReg, bool KillSrc) const override;
+
+public:
   void storeRegToStackSlot(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI, Register SrcReg,
                            bool IsKill, int FrameIndex,
