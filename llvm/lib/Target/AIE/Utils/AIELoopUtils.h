@@ -43,7 +43,11 @@ constexpr StringLiteral OuterLoopPipelinedKey{
 constexpr StringLiteral OuterLoopSpeculativeKey{
     "llvm.loop.hint.aie_outerloop_pipeliner_speculative"};
 
+constexpr StringLiteral OuterLoopDeferredStageSplitKey{
+    "llvm.loop.hint.aie_outerloop_pipeliner_deferred_stage_split"};
+
 bool isOuterLoopPipelined(const MachineBasicBlock &LoopLatch);
+bool hasDeferredOuterLoopStageSplit(const MachineBasicBlock &LoopLatch);
 
 /// Loop-hint key that requests AIE loop versioning. It is the user-facing hint
 /// (set via pragma) and is consumed by the IR versioning pass, which strips it

@@ -12,17 +12,20 @@
 
 #include "AIE.h"
 #include "AIEDataDependenceHelper.h"
-#include "AIELiveRegs.h"
 #include "Utils/AIELoopUtils.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
-#include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineSSAUpdater.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
+#include <optional>
 #include <utility>
 
 #define DEBUG_TYPE "aie-outer-loop-stage-split"
@@ -33,6 +36,8 @@ static const char AIEOuterLoopStageSplitName[] = "AIE Outer Loop Stage Split";
 
 namespace {
 
+constexpr unsigned LongLatencyThreshold = 4;
+
 static void initializeDependencyContext(MachineSchedContext &Context,
                                         MachineFunction &MF,
                                         const MachineLoopInfo &MLI,
@@ -42,10 +47,476 @@ static void initializeDependencyContext(MachineSchedContext &Context,
   Context.AA = &AA;
 }
 
-class AIEOuterLoopStageSplit : public MachineFunctionPass {
-  MachineRegisterInfo *MRI = nullptr;
-  const TargetRegisterInfo *TRI = nullptr;
+struct InstructionPair {
+  MachineInstr *Top = nullptr;
+  MachineInstr *Latch = nullptr;
+  SUnit *TopSU = nullptr;
+  SUnit *LatchSU = nullptr;
+};
 
+struct DependencyContext : MachineSchedContext {
+  DependencyContext(MachineFunction &MF, const MachineLoopInfo &MLI,
+                    AAResults &AA) {
+    initializeDependencyContext(*this, MF, MLI, AA);
+  }
+};
+
+class StageSplitLoop {
+  MachineFunction &MF;
+  MachineRegisterInfo &MRI;
+  const TargetInstrInfo &TII;
+  MachineBasicBlock &Top;
+  MachineBasicBlock &Header;
+  MachineBasicBlock &Latch;
+  MachineBasicBlock &LastTop;
+  SmallPtrSet<MachineBasicBlock *, 8> LastIterationBlocks;
+  DependencyContext DAGContext;
+  AIE::DataDependenceHelper TopDAG;
+  AIE::DataDependenceHelper LatchDAG;
+  SmallVector<InstructionPair> Pairs;
+  DenseMap<MachineInstr *, unsigned> PairIndices;
+  DenseSet<std::pair<Register, Register>> CorrespondingRegs;
+  SmallSetVector<unsigned, 32> Selected;
+  DenseMap<Register, Register> SteadyDefs;
+  DenseMap<Register, Register> LastIterationDefs;
+  DenseMap<Register, Register> ReplacedPHIs;
+
+public:
+  StageSplitLoop(MachineFunction &MF, const MachineLoopInfo &MLI, AAResults &AA,
+                 MachineBasicBlock &Top, MachineBasicBlock &Header,
+                 MachineBasicBlock &Latch, MachineBasicBlock &LastTop)
+      : MF(MF), MRI(MF.getRegInfo()), TII(*MF.getSubtarget().getInstrInfo()),
+        Top(Top), Header(Header), Latch(Latch), LastTop(LastTop),
+        DAGContext(MF, MLI, AA), TopDAG(DAGContext, /*AddMutators=*/true,
+                                        /*ExactLatencies=*/true),
+        LatchDAG(DAGContext, /*AddMutators=*/true,
+                 /*ExactLatencies=*/true) {
+    collectLastIterationBlocks(MLI);
+  }
+
+  bool run() {
+    buildDAGs();
+    collectRegisterCorrespondence();
+    pairInstructions();
+    selectProfitableSuffixes();
+    if (Selected.empty() || !validateSelectedUses())
+      return false;
+
+    moveSelectedInstructions();
+    return true;
+  }
+
+private:
+  void collectLastIterationBlocks(const MachineLoopInfo &MLI) {
+    LastIterationBlocks.insert(&LastTop);
+    MachineBasicBlock *InnerHeader = *LastTop.succ_begin();
+    const MachineLoop *InnerLoop = MLI.getLoopFor(InnerHeader);
+    if (!InnerLoop)
+      return;
+    for (MachineBasicBlock *MBB : InnerLoop->blocks())
+      LastIterationBlocks.insert(MBB);
+    if (MachineBasicBlock *Exit = InnerLoop->getExitBlock())
+      LastIterationBlocks.insert(Exit);
+  }
+
+  void buildDAGs() {
+    TopDAG.buildGraph(Top);
+    LatchDAG.buildGraph(Latch);
+  }
+
+  bool haveCompatibleRegisters(Register TopReg, Register LatchReg) const {
+    if (!TopReg || !LatchReg)
+      return TopReg == LatchReg;
+    if (TopReg.isPhysical() || LatchReg.isPhysical())
+      return TopReg == LatchReg;
+    return MRI.getRegClass(TopReg) == MRI.getRegClass(LatchReg) &&
+           MRI.getType(TopReg) == MRI.getType(LatchReg);
+  }
+
+  bool haveEquivalentRegisterShape(const MachineOperand &TopMO,
+                                   const MachineOperand &LatchMO) const {
+    assert(TopMO.isReg() && LatchMO.isReg());
+    if (TopMO.isDef() != LatchMO.isDef() ||
+        TopMO.isImplicit() != LatchMO.isImplicit() ||
+        TopMO.isUndef() != LatchMO.isUndef() ||
+        TopMO.isInternalRead() != LatchMO.isInternalRead() ||
+        TopMO.isEarlyClobber() != LatchMO.isEarlyClobber() ||
+        TopMO.getSubReg() != LatchMO.getSubReg())
+      return false;
+    Register TopReg = TopMO.getReg();
+    Register LatchReg = LatchMO.getReg();
+    if (TopReg.isPhysical() != LatchReg.isPhysical())
+      return false;
+    if (TopReg.isPhysical())
+      return TopReg == LatchReg && TopMO.isRenamable() == LatchMO.isRenamable();
+    return haveCompatibleRegisters(TopReg, LatchReg);
+  }
+
+  bool haveEquivalentOperands(const MachineOperand &TopMO,
+                              const MachineOperand &LatchMO) const {
+    if (!TopMO.isReg() || !LatchMO.isReg())
+      return TopMO.isIdenticalTo(LatchMO);
+    if (!haveEquivalentRegisterShape(TopMO, LatchMO))
+      return false;
+    Register TopReg = TopMO.getReg();
+    Register LatchReg = LatchMO.getReg();
+    return haveCompatibleRegisters(TopReg, LatchReg) &&
+           (TopReg.isPhysical() || TopReg == LatchReg ||
+            CorrespondingRegs.contains({TopReg, LatchReg}));
+  }
+
+  bool areEquivalent(const MachineInstr &TopMI,
+                     const MachineInstr &LatchMI) const {
+    if (TopMI.getOpcode() != LatchMI.getOpcode() ||
+        TopMI.getFlags() != LatchMI.getFlags() ||
+        TopMI.getNumOperands() != LatchMI.getNumOperands())
+      return false;
+    for (auto [TopMO, LatchMO] :
+         zip_equal(TopMI.operands(), LatchMI.operands()))
+      if (!haveEquivalentOperands(TopMO, LatchMO))
+        return false;
+    return true;
+  }
+
+  static bool isPairCandidate(const MachineInstr &MI) {
+    return !MI.isPHI() && !MI.isTerminator() && !MI.isDebugInstr() &&
+           !MI.isPosition();
+  }
+
+  bool haveEquivalentShape(const MachineInstr &TopMI,
+                           const MachineInstr &LatchMI) const {
+    if (TopMI.getOpcode() != LatchMI.getOpcode() ||
+        TopMI.getFlags() != LatchMI.getFlags() ||
+        TopMI.getNumOperands() != LatchMI.getNumOperands())
+      return false;
+    for (auto [TopMO, LatchMO] :
+         zip_equal(TopMI.operands(), LatchMI.operands())) {
+      if (TopMO.isReg() != LatchMO.isReg())
+        return false;
+      if (!TopMO.isReg() && !TopMO.isIdenticalTo(LatchMO))
+        return false;
+      if (TopMO.isReg() && !haveEquivalentRegisterShape(TopMO, LatchMO))
+        return false;
+    }
+    return true;
+  }
+
+  void collectRegisterPair(Register TopReg, Register LatchReg) {
+    if (!haveCompatibleRegisters(TopReg, LatchReg) || !TopReg.isVirtual() ||
+        !CorrespondingRegs.insert({TopReg, LatchReg}).second)
+      return;
+
+    MachineInstr *TopDef = MRI.getVRegDef(TopReg);
+    MachineInstr *LatchDef = MRI.getVRegDef(LatchReg);
+    if (!TopDef || !LatchDef || TopDef->getParent() != &Top ||
+        LatchDef->getParent() != &Latch ||
+        !haveEquivalentShape(*TopDef, *LatchDef))
+      return;
+    for (auto [TopMO, LatchMO] :
+         zip_equal(TopDef->operands(), LatchDef->operands()))
+      if (TopMO.isReg() && !TopMO.isDef())
+        collectRegisterPair(TopMO.getReg(), LatchMO.getReg());
+  }
+
+  void collectRegisterCorrespondence() {
+    for (MachineInstr &PHI : Header.phis()) {
+      auto Inputs = getPHIInputs(PHI);
+      if (Inputs)
+        collectRegisterPair(Inputs->first, Inputs->second);
+    }
+  }
+
+  void pairInstructions() {
+    auto LatchIt = Latch.begin();
+    for (MachineInstr &TopMI : Top) {
+      if (!isPairCandidate(TopMI))
+        continue;
+      auto Match = llvm::find_if(
+          make_range(LatchIt, Latch.end()), [&](MachineInstr &LatchMI) {
+            return isPairCandidate(LatchMI) && areEquivalent(TopMI, LatchMI);
+          });
+      if (Match == Latch.end())
+        continue;
+
+      SUnit *TopSU = TopDAG.getSUnit(&TopMI);
+      SUnit *LatchSU = LatchDAG.getSUnit(&*Match);
+      if (!TopSU || !LatchSU)
+        continue;
+      unsigned Index = Pairs.size();
+      Pairs.push_back({&TopMI, &*Match, TopSU, LatchSU});
+      PairIndices[&TopMI] = Index;
+      PairIndices[&*Match] = Index;
+      LatchIt = std::next(Match);
+    }
+  }
+
+  static bool isMovable(const MachineInstr &MI) {
+    bool SawStore = false;
+    return !MI.isCall() && !MI.isInlineAsm() && !MI.isNotDuplicable() &&
+           !MI.isConvergent() && !MI.hasOrderedMemoryRef() &&
+           MI.isSafeToMove(SawStore);
+  }
+
+  using SuccessorEdge = std::pair<unsigned, unsigned>;
+
+  bool getStrongSuccessors(const InstructionPair &Pair, bool UseTop,
+                           SmallVectorImpl<SuccessorEdge> &Successors) const {
+    const SUnit *SU = UseTop ? Pair.TopSU : Pair.LatchSU;
+    for (const SDep &Dep : SU->Succs) {
+      if (Dep.isWeak() || Dep.getSUnit()->isBoundaryNode())
+        continue;
+      MachineInstr *SuccMI = Dep.getSUnit()->getInstr();
+      auto It = PairIndices.find(SuccMI);
+      if (It == PairIndices.end())
+        return false;
+      Successors.emplace_back(It->second, static_cast<unsigned>(Dep.getKind()));
+    }
+    llvm::sort(Successors);
+    Successors.erase(llvm::unique(Successors), Successors.end());
+    return true;
+  }
+
+  bool collectSuffix(unsigned Index, DenseSet<unsigned> &Suffix) const {
+    if (!Suffix.insert(Index).second)
+      return true;
+    const InstructionPair &Pair = Pairs[Index];
+    if (!isMovable(*Pair.Top) || !isMovable(*Pair.Latch))
+      return false;
+
+    SmallVector<SuccessorEdge, 4> TopSuccessors;
+    SmallVector<SuccessorEdge, 4> LatchSuccessors;
+    if (!getStrongSuccessors(Pair, /*UseTop=*/true, TopSuccessors) ||
+        !getStrongSuccessors(Pair, /*UseTop=*/false, LatchSuccessors) ||
+        TopSuccessors != LatchSuccessors)
+      return false;
+    for (const SuccessorEdge &Successor : TopSuccessors)
+      if (!collectSuffix(Successor.first, Suffix))
+        return false;
+    return true;
+  }
+
+  void selectProfitableSuffixes() {
+    for (unsigned Index = 0; Index < Pairs.size(); ++Index) {
+      const InstructionPair &Pair = Pairs[Index];
+      unsigned Latency = std::min(Pair.TopSU->Latency, Pair.LatchSU->Latency);
+      LLVM_DEBUG(dbgs() << "Stage-split pair latency " << Latency << ": "
+                        << *Pair.Top);
+      if (Latency < LongLatencyThreshold)
+        continue;
+
+      DenseSet<unsigned> Suffix;
+      if (!collectSuffix(Index, Suffix))
+        continue;
+      for (unsigned Candidate = 0; Candidate < Pairs.size(); ++Candidate)
+        if (Suffix.contains(Candidate))
+          Selected.insert(Candidate);
+    }
+  }
+
+  std::optional<std::pair<Register, Register>>
+  getPHIInputs(const MachineInstr &PHI) const {
+    Register TopReg;
+    Register LatchReg;
+    for (unsigned I = 1; I < PHI.getNumOperands(); I += 2) {
+      Register Reg = PHI.getOperand(I).getReg();
+      MachineBasicBlock *Incoming = PHI.getOperand(I + 1).getMBB();
+      if (Incoming == &Top)
+        TopReg = Reg;
+      else if (Incoming == &Latch)
+        LatchReg = Reg;
+    }
+    if (!TopReg || !LatchReg)
+      return std::nullopt;
+    return std::pair(TopReg, LatchReg);
+  }
+
+  MachineInstr *findMergePHI(Register TopReg, Register LatchReg) const {
+    for (MachineInstr &PHI : Header.phis()) {
+      auto Inputs = getPHIInputs(PHI);
+      if (Inputs && Inputs->first == TopReg && Inputs->second == LatchReg)
+        return &PHI;
+    }
+    return nullptr;
+  }
+
+  bool isSelectedInstruction(const MachineInstr *MI) const {
+    auto It = PairIndices.find(const_cast<MachineInstr *>(MI));
+    return It != PairIndices.end() && Selected.contains(It->second);
+  }
+
+  bool validateDefinitionUses(Register TopReg, Register LatchReg) const {
+    MachineInstr *OutputPHI = findMergePHI(TopReg, LatchReg);
+    for (MachineOperand &Use : MRI.use_nodbg_operands(TopReg)) {
+      MachineInstr *UseMI = Use.getParent();
+      if (!isSelectedInstruction(UseMI) && UseMI != OutputPHI)
+        return false;
+    }
+    for (MachineOperand &Use : MRI.use_nodbg_operands(LatchReg)) {
+      MachineInstr *UseMI = Use.getParent();
+      if (!isSelectedInstruction(UseMI) && UseMI != OutputPHI &&
+          !LastIterationBlocks.contains(UseMI->getParent()))
+        return false;
+    }
+    return true;
+  }
+
+  bool validateSelectedUses() const {
+    for (unsigned Index : Selected) {
+      const InstructionPair &Pair = Pairs[Index];
+      for (auto [TopMO, LatchMO] :
+           zip_equal(Pair.Top->operands(), Pair.Latch->operands())) {
+        if (!TopMO.isReg() || !TopMO.isDef() || !TopMO.getReg().isVirtual())
+          continue;
+        if (!validateDefinitionUses(TopMO.getReg(), LatchMO.getReg()))
+          return false;
+      }
+    }
+    return true;
+  }
+
+  Register getOrCreateSteadyInput(Register TopReg, Register LatchReg) {
+    if (TopReg == LatchReg)
+      return TopReg;
+    if (auto It = SteadyDefs.find(TopReg); It != SteadyDefs.end())
+      return It->second;
+    if (MachineInstr *PHI = findMergePHI(TopReg, LatchReg))
+      return PHI->getOperand(0).getReg();
+
+    Register NewReg = MRI.cloneVirtualRegister(TopReg);
+    BuildMI(Header, Header.getFirstNonPHI(), DebugLoc(),
+            TII.get(TargetOpcode::PHI), NewReg)
+        .addReg(TopReg)
+        .addMBB(&Top)
+        .addReg(LatchReg)
+        .addMBB(&Latch);
+    return NewReg;
+  }
+
+  void remapUses(InstructionPair &Pair, MachineInstr &SteadyMI,
+                 MachineInstr &LastMI) {
+    for (unsigned I = 0; I < SteadyMI.getNumOperands(); ++I) {
+      MachineOperand &SteadyMO = SteadyMI.getOperand(I);
+      MachineOperand &LastMO = LastMI.getOperand(I);
+      const MachineOperand &TopMO = Pair.Top->getOperand(I);
+      const MachineOperand &LatchMO = Pair.Latch->getOperand(I);
+      if (!SteadyMO.isReg() || SteadyMO.isDef() ||
+          !SteadyMO.getReg().isVirtual())
+        continue;
+
+      Register TopReg = TopMO.getReg();
+      Register LatchReg = LatchMO.getReg();
+      SteadyMO.setReg(getOrCreateSteadyInput(TopReg, LatchReg));
+      if (auto It = LastIterationDefs.find(LatchReg);
+          It != LastIterationDefs.end())
+        LastMO.setReg(It->second);
+      else if (auto It = ReplacedPHIs.find(LatchReg); It != ReplacedPHIs.end())
+        LastMO.setReg(It->second);
+    }
+  }
+
+  void remapDefinitions(InstructionPair &Pair, MachineInstr &SteadyMI,
+                        MachineInstr &LastMI) {
+    for (unsigned I = 0; I < SteadyMI.getNumOperands(); ++I) {
+      MachineOperand &SteadyMO = SteadyMI.getOperand(I);
+      MachineOperand &LastMO = LastMI.getOperand(I);
+      if (!SteadyMO.isReg() || !SteadyMO.isDef() ||
+          !SteadyMO.getReg().isVirtual())
+        continue;
+
+      Register TopReg = Pair.Top->getOperand(I).getReg();
+      Register LatchReg = Pair.Latch->getOperand(I).getReg();
+      Register SteadyReg = MRI.cloneVirtualRegister(TopReg);
+      Register LastReg = MRI.cloneVirtualRegister(LatchReg);
+      SteadyMO.setReg(SteadyReg);
+      LastMO.setReg(LastReg);
+      SteadyDefs[TopReg] = SteadyReg;
+      LastIterationDefs[LatchReg] = LastReg;
+      if (MachineInstr *PHI = findMergePHI(TopReg, LatchReg))
+        ReplacedPHIs[PHI->getOperand(0).getReg()] = SteadyReg;
+    }
+  }
+
+  void cloneSelectedInstructions() {
+    auto SteadyInsert = Header.getFirstNonPHI();
+    auto LastInsert = LastTop.getFirstNonPHI();
+    for (unsigned Index = 0; Index < Pairs.size(); ++Index) {
+      if (!Selected.contains(Index))
+        continue;
+      InstructionPair &Pair = Pairs[Index];
+      MachineInstr *SteadyMI = MF.CloneMachineInstr(Pair.Top);
+      MachineInstr *LastMI = MF.CloneMachineInstr(Pair.Latch);
+      Header.insert(SteadyInsert, SteadyMI);
+      LastTop.insert(LastInsert, LastMI);
+      remapUses(Pair, *SteadyMI, *LastMI);
+      remapDefinitions(Pair, *SteadyMI, *LastMI);
+      SteadyMI->cloneMergedMemRefs(MF, {Pair.Top, Pair.Latch});
+    }
+  }
+
+  void rewriteLastIterationUses() {
+    for (auto [OldReg, NewReg] : LastIterationDefs) {
+      SmallVector<MachineOperand *, 8> Uses;
+      for (MachineOperand &Use : MRI.use_operands(OldReg))
+        if (LastIterationBlocks.contains(Use.getParent()->getParent()))
+          Uses.push_back(&Use);
+      for (MachineOperand *Use : Uses)
+        Use->setReg(NewReg);
+    }
+  }
+
+  void replaceOutputPHIs() {
+    for (auto [OldReg, NewReg] : ReplacedPHIs) {
+      MachineInstr *PHI = MRI.getVRegDef(OldReg);
+      assert(PHI && PHI->isPHI());
+      SmallVector<MachineOperand *, 8> Uses;
+      for (MachineOperand &Use : MRI.use_operands(OldReg))
+        Uses.push_back(&Use);
+      for (MachineOperand *Use : Uses)
+        Use->setReg(NewReg);
+      PHI->eraseFromParent();
+    }
+  }
+
+  void eraseOriginalInstructions() {
+    for (unsigned Index = Pairs.size(); Index-- > 0;) {
+      if (!Selected.contains(Index))
+        continue;
+      for (MachineOperand &Def : Pairs[Index].Top->defs())
+        if (Def.getReg().isVirtual())
+          MRI.markUsesInDebugValueAsUndef(Def.getReg());
+      for (MachineOperand &Def : Pairs[Index].Latch->defs())
+        if (Def.getReg().isVirtual())
+          MRI.markUsesInDebugValueAsUndef(Def.getReg());
+      Pairs[Index].Top->eraseFromParent();
+      Pairs[Index].Latch->eraseFromParent();
+    }
+  }
+
+  void eraseDeadPHIs() {
+    bool Changed;
+    do {
+      Changed = false;
+      for (MachineInstr &PHI : make_early_inc_range(Header.phis())) {
+        Register Def = PHI.getOperand(0).getReg();
+        if (!MRI.use_nodbg_empty(Def))
+          continue;
+        MRI.markUsesInDebugValueAsUndef(Def);
+        PHI.eraseFromParent();
+        Changed = true;
+      }
+    } while (Changed);
+  }
+
+  void moveSelectedInstructions() {
+    cloneSelectedInstructions();
+    replaceOutputPHIs();
+    rewriteLastIterationUses();
+    eraseOriginalInstructions();
+    eraseDeadPHIs();
+  }
+};
+
+class AIEOuterLoopStageSplit : public MachineFunctionPass {
 public:
   static char ID;
   AIEOuterLoopStageSplit() : MachineFunctionPass(ID) {}
@@ -55,36 +526,27 @@ public:
       return false;
 
     MachineLoopInfo &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
-    MachineOptimizationRemarkEmitter &ORE =
-        getAnalysis<MachineOptimizationRemarkEmitterPass>().getORE();
     AAResults &AA = getAnalysis<AAResultsWrapperPass>().getAAResults();
-    MRI = &MF.getRegInfo();
-    TRI = MF.getSubtarget().getRegisterInfo();
-    assert(MRI->isSSA() && "stage split must run before PHI elimination");
-
-    MachineSchedContext Context;
-    initializeDependencyContext(Context, MF, MLI, AA);
-    AIE::DataDependenceHelper DAG(Context, /*AddMutators=*/false,
-                                  /*ExactLatencies=*/false);
+    assert(MF.getRegInfo().isSSA() &&
+           "stage split must run before PHI elimination");
 
     bool Changed = false;
     SmallVector<MachineBasicBlock *> Latches;
     for (MachineBasicBlock &MBB : MF)
-      if (AIELoopUtils::isOuterLoopPipelined(MBB))
+      if (AIELoopUtils::hasDeferredOuterLoopStageSplit(MBB))
         Latches.push_back(&MBB);
 
     for (MachineBasicBlock *Latch : Latches) {
       LLVM_DEBUG(dbgs() << "Found OLP Movement candidate: "
                         << printMBBReference(*Latch) << " (" << Latch->getName()
                         << ")\n");
-      verifyOLPCFG(*Latch, MLI);
+      Changed |= splitDeferredLoop(MF, MLI, AA, *Latch);
     }
     return Changed;
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineLoopInfoWrapperPass>();
-    AU.addRequired<MachineOptimizationRemarkEmitterPass>();
     AU.addRequired<AAResultsWrapperPass>();
     AU.addPreserved<MachineLoopInfoWrapperPass>();
     MachineFunctionPass::getAnalysisUsage(AU);
@@ -93,26 +555,23 @@ public:
   StringRef getPassName() const override { return AIEOuterLoopStageSplitName; }
 
 private:
-  /// Assert the CFG around a detected OLP latch matches the skeleton the
-  /// pipeliner produces (see AIEOuterLoopPipeliner.cpp:36-62; naming at
-  /// :1072,1160-1161,1177-1194):
-  ///
-  ///   [outer preheader] -> [stage0.top] -> [steady.stage1.top] <----\  header
-  ///                                              |                   |
-  ///                                     [steady inner loop]          |
-  ///                                     backedge
-  ///                                              |                   |
-  ///                        [steady.stage1.bottom.and.stage0.top] ----/  latch
-  ///                                              | (exit edge)
-  ///                        [lastiter.stage1.top]
-  ///                                              |
-  ///                                     [lastiter inner loop]
-  ///                                              |
-  ///                        [lastiter.stage1.bottom] -> [exit]
-  ///
-  /// The steady side is identical across all OLP modes. The last-iteration
-  /// region is only present in non-speculative modes; under speculative /
-  /// lean-stage0 the latch exits straight to the function.
+  bool splitDeferredLoop(MachineFunction &MF, MachineLoopInfo &MLI,
+                         AAResults &AA, MachineBasicBlock &Latch) {
+    verifyOLPCFG(Latch, MLI);
+    MachineLoop *Loop = MLI.getLoopFor(&Latch);
+    MachineBasicBlock *Header = Loop->getHeader();
+    MachineBasicBlock *Top = Loop->getLoopPreheader();
+    MachineBasicBlock *LastTop = nullptr;
+    for (MachineBasicBlock *Successor : Latch.successors())
+      if (Successor != Header)
+        LastTop = Successor;
+    assert(LastTop && LastTop->getName().contains("lastiter.stage1.top"));
+
+    StageSplitLoop Split(MF, MLI, AA, *Top, *Header, Latch, *LastTop);
+    return Split.run();
+  }
+
+  /// Verify the deferred-split CFG produced by the outer-loop pipeliner.
   void verifyOLPCFG(const MachineBasicBlock &Latch,
                     const MachineLoopInfo &MLI) {
     const MachineLoop *L = MLI.getLoopFor(&Latch);
@@ -124,23 +583,20 @@ private:
     assert(Preheader &&
            "OLP steady-state loop lacks the stage0.top preheader slot");
 
-    // stage0.top slot: single entry from the outer preheader, single exit to
-    // the steady header.
+    // The stage-0 slot has one entry and falls through to the steady header.
     assert(Preheader->pred_size() == 1 &&
            "stage0.top must have a single predecessor (outer preheader)");
     assert(Preheader->succ_size() == 1 && Preheader->isSuccessor(Header) &&
            "stage0.top must fall through only to the steady header");
 
-    // steady.stage1.top header: entered exactly from the preheader and the
-    // latch backedge; falls into the inner-loop region.
+    // The steady header merges the stage-0 entry and backedge.
     assert(Header->pred_size() == 2 && Preheader->isSuccessor(Header) &&
            Latch.isSuccessor(Header) &&
            "steady header must be entered only from stage0.top and the latch");
     assert(Header->succ_size() == 1 && L->contains(*Header->succ_begin()) &&
            "steady header must fall into the inner-loop region");
 
-    // steady.stage1.bottom.and.stage0.top latch: backedge to the header plus a
-    // single out-of-loop exit; entered only from the inner-loop exit.
+    // The latch has one inner predecessor, a backedge, and an exit.
     assert(Latch.succ_size() == 2 && Latch.isSuccessor(Header) &&
            "steady latch must have a backedge and one exit successor");
     [[maybe_unused]] const MachineBasicBlock *Exit = nullptr;
@@ -152,18 +608,14 @@ private:
     assert(Latch.pred_size() == 1 && L->contains(*Latch.pred_begin()) &&
            "steady latch must be entered only from the inner-loop exit");
 
-    // Names the pipeliner assigns to the steady blocks.
     assert(Latch.getName().contains("steady.stage1.bottom") &&
            Header->getName().contains("steady.stage1.top") &&
            Preheader->getName().contains("stage0.top") &&
            "unexpected steady-loop block naming");
 
-    // Last-iteration region: only in non-speculative modes.
     if (!Exit->getName().contains("lastiter"))
       return;
 
-    // lastiter.stage1.top: lies outside the steady loop; entered only from the
-    // steady latch; single fall-through into the peeled inner loop.
     [[maybe_unused]] const MachineBasicBlock *LastTop = Exit;
     assert(!L->contains(LastTop) &&
            "last-iteration region must lie outside the steady loop");
@@ -172,14 +624,11 @@ private:
     assert(LastTop->succ_size() == 1 &&
            "lastiter top must fall into the peeled inner loop");
 
-    // The peeled inner loop: a distinct loop whose preheader is lastiter top.
     [[maybe_unused]] const MachineLoop *IL =
         MLI.getLoopFor(*LastTop->succ_begin());
     assert(IL && IL != L && IL->getLoopPreheader() == LastTop &&
            "lastiter inner loop must be a distinct loop below lastiter top");
 
-    // lastiter.stage1.bottom: the peeled loop's single exit; falls through once
-    // to the function exit.
     [[maybe_unused]] const MachineBasicBlock *LastBottom = IL->getExitBlock();
     assert(LastBottom && !IL->contains(LastBottom) &&
            LastBottom->succ_size() == 1 &&
@@ -197,7 +646,6 @@ char AIEOuterLoopStageSplit::ID = 0;
 INITIALIZE_PASS_BEGIN(AIEOuterLoopStageSplit, DEBUG_TYPE,
                       AIEOuterLoopStageSplitName, false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(MachineOptimizationRemarkEmitterPass)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_END(AIEOuterLoopStageSplit, DEBUG_TYPE,
                     AIEOuterLoopStageSplitName, false, false)

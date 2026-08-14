@@ -119,7 +119,7 @@
 ; CHECK-NEXT: %c.ptr.next.steady.bottom = getelementptr inbounds i32, ptr %c.ptr.next.steady.phi, i32 1
 ; CHECK-NEXT: %outer.ctr.next = call i32 @llvm.loop.decrement.reg.i32(i32 %outer.ctr, i32 1)
 ; CHECK-NEXT: %outer.loop.cond = icmp ne i32 %outer.ctr.next, 0
-; CHECK-NEXT: br i1 %outer.loop.cond, label %steady.stage1.top, label %lastiter.stage1.top, !llvm.loop !5
+; CHECK-NEXT: br i1 %outer.loop.cond, label %steady.stage1.top, label %lastiter.stage1.top, !llvm.loop !6
 ; CHECK-NEXT: lastiter.stage1.top: ; preds = %steady.stage1.bottom.and.stage0.top
 ; CHECK-NEXT: call void @llvm.set.loop.iterations.i32(i32 %M)
 ; CHECK-NEXT: br label %lastiter.stage1.inner.inner.header

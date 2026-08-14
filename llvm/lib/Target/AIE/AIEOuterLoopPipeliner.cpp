@@ -500,7 +500,7 @@ public:
 
   // Repair loop metadata (trip count changed): decrement itercount.range, drop
   // the consumed enable hint, and append the success marker.
-  void updateLoopMetadata() const;
+  void updateLoopMetadata(bool HasDeferredStageSplit) const;
 
   // Mark this loop as speculatively outer-loop pipelined without adjusting its
   // iteration-count metadata.
@@ -1048,10 +1048,7 @@ AIEOuterLoopPipeliner::remapToClone(ArrayRef<Instruction *> Insts,
 void AIEOuterLoopPipeliner::cloneStage0IntoPreheader(
     const OrigLoopStructure &OrigLS, CloneLoopStructure &SteadyLS,
     RemapTable &PreheaderVMap) {
-  // Always create the stage-0 top preheader block, even with an empty stage 0
-  // (skip-split): it holds the preheader-level bound/JNZD setup and is the slot
-  // a later pass fills with the prefetch chain. With no stage-0 chain it stays
-  // empty of prefetch.
+  // Every stage mode uses this entry-side stage-0 slot.
   Function *F = SteadyLS.getTop()->getParent();
   BasicBlock *Preheader = SteadyLS.getPreheader();
 
@@ -1648,7 +1645,8 @@ void CloneLoopStructure::adjustLoopBound() const {
 // pipeliner success marker and, optionally, the speculative marker, and
 // self-reference operand 0 as a loop ID requires.
 static MDNode *rebuildPipelinedLoopID(LLVMContext &Ctx, MDNode *Source,
-                                      bool IsSpeculative = false) {
+                                      bool IsSpeculative = false,
+                                      bool HasDeferredStageSplit = false) {
   const std::string EnableHintKey =
       (AIE::LoopOptionOverrides::Prefix + EnableOuterLoopPipelining.ArgStr)
           .str();
@@ -1670,6 +1668,14 @@ static MDNode *rebuildPipelinedLoopID(LLVMContext &Ctx, MDNode *Source,
        ConstantAsMetadata::get(ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
   MDs.push_back(SuccessEntry);
 
+  if (HasDeferredStageSplit) {
+    MDNode *DeferredEntry = MDNode::get(
+        Ctx,
+        {MDString::get(Ctx, AIELoopUtils::OuterLoopDeferredStageSplitKey),
+         ConstantAsMetadata::get(ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
+    MDs.push_back(DeferredEntry);
+  }
+
   if (IsSpeculative) {
     MDNode *SpeculativeEntry = MDNode::get(
         Ctx,
@@ -1687,7 +1693,7 @@ static MDNode *rebuildPipelinedLoopID(LLVMContext &Ctx, MDNode *Source,
   return FinalLoopID;
 }
 
-void CloneLoopStructure::updateLoopMetadata() const {
+void CloneLoopStructure::updateLoopMetadata(bool HasDeferredStageSplit) const {
   MDNode *LoopID = getOuterLoopID();
   if (!LoopID)
     return;
@@ -1700,7 +1706,8 @@ void CloneLoopStructure::updateLoopMetadata() const {
   MDNode *Source = AdjustedID ? AdjustedID : LoopID;
 
   // Drop the consumed enable hint and append the success marker.
-  MDNode *FinalLoopID = rebuildPipelinedLoopID(Ctx, Source);
+  MDNode *FinalLoopID = rebuildPipelinedLoopID(
+      Ctx, Source, /*IsSpeculative=*/false, HasDeferredStageSplit);
 
   // Write onto the latch terminator (what Loop::setLoopID does internally) so
   // this works on a clone with no LoopInfo Loop.
@@ -1879,7 +1886,7 @@ bool AIEOuterLoopPipeliner::performTransformation(OrigLoopStructure &OrigLS,
     // Peel the last iteration into a separate region (no prefetch loads).
     peelLastIteration(OrigLS, SteadyLS);
     // Adjust itercount metadata to reflect the reduced trip count (N-1).
-    SteadyLS.updateLoopMetadata();
+    SteadyLS.updateLoopMetadata(Opts.SkipSplit);
   } else {
     // Mark the loop as speculatively pipelined (no iteration peeled).
     SteadyLS.markSpeculativePipelining();

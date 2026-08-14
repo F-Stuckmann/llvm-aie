@@ -160,8 +160,6 @@
 ; AIE-O123-NEXT:      Remove dead machine instructions
 ; AIE-O123-NEXT:      MachineDominator Tree Construction
 ; AIE-O123-NEXT:      Machine Natural Loop Construction
-; AIE-O123-NEXT:      Lazy Machine Block Frequency Analysis
-; AIE-O123-NEXT:      Machine Optimization Remark Emitter
 ; AIE-O123-NEXT:      Function Alias Analysis Results
 ; AIE-O123-NEXT:      AIE Outer Loop Stage Split
 ; AIE-O0123-NEXT:      ResetMachineFunction

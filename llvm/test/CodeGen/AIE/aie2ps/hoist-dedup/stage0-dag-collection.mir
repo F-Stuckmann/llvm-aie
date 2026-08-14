@@ -44,66 +44,22 @@ selected:        true
 tracksRegLiveness: true
 body:             |
   ; CHECK-LABEL: name: stage0_dag_collection
-  ; CHECK: bb.0.entry:
-  ; CHECK-NEXT:   successors: %bb.1(0x80000000)
-  ; CHECK-NEXT:   liveins: $p0, $p1
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[COPY:%[0-9]+]]:ep = COPY $p0
-  ; CHECK-NEXT:   [[COPY1:%[0-9]+]]:ep = COPY $p1
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.1
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.1.stage0.top:
-  ; CHECK-NEXT:   successors: %bb.2(0x80000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[COPY2:%[0-9]+]]:ep = COPY [[COPY]]
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.2
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.2.steady.stage1.top:
-  ; CHECK-NEXT:   successors: %bb.3(0x80000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:ep = PHI [[COPY2]], %bb.1, %11, %bb.4
-  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo1:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[PHI]], 64 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   [[COPY3:%[0-9]+]]:vec512 = COPY [[VLD_x_pstm_nrm_imm_pseudo]]
-  ; CHECK-NEXT:   [[COPY4:%[0-9]+]]:ep = COPY [[VLD_x_pstm_nrm_imm_pseudo1]]
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.3
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.3.steady.inner:
-  ; CHECK-NEXT:   successors: %bb.3(0x40000000), %bb.4(0x40000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   PseudoLoopEnd <mcsymbol .L_steady_end>, %bb.3
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.4
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.4.steady.stage1.bottom.and.stage0.top:
-  ; CHECK-NEXT:   successors: %bb.2(0x40000000), %bb.5(0x40000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[COPY5:%[0-9]+]]:ep = COPY [[COPY1]]
-  ; CHECK-NEXT:   [[MOVXM_lng_cg:%[0-9]+]]:ep_as_32bit = MOVXM_lng_cg %bb.2
-  ; CHECK-NEXT:   [[MOV_RLC_imm11_pseudo:%[0-9]+]]:er = MOV_RLC_imm11_pseudo 1
-  ; CHECK-NEXT:   [[LoopDec:%[0-9]+]]:er = LoopDec [[MOV_RLC_imm11_pseudo]], implicit-def $srcarry
-  ; CHECK-NEXT:   LoopJNZ [[LoopDec]], [[MOVXM_lng_cg]]
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.5
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.5.lastiter.stage1.top:
-  ; CHECK-NEXT:   successors: %bb.6(0x80000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo2:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo3:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[COPY5]], 64 :: (load (<32 x s16>))
-  ; CHECK-NEXT:   [[COPY6:%[0-9]+]]:vec512 = COPY [[VLD_x_pstm_nrm_imm_pseudo2]]
-  ; CHECK-NEXT:   [[COPY7:%[0-9]+]]:ep = COPY [[VLD_x_pstm_nrm_imm_pseudo3]]
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.6
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.6.lastiter.inner:
-  ; CHECK-NEXT:   successors: %bb.6(0x40000000), %bb.7(0x40000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   PseudoLoopEnd <mcsymbol .L_lastiter_end>, %bb.6
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.7
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.7.lastiter.stage1.bottom:
-  ; CHECK-NEXT:   successors: %bb.8(0x80000000)
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.8
-  ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT: bb.8.exit:
-  ; CHECK-NEXT:   PseudoRET implicit $lr
+  ; CHECK: bb.1.stage0.top:
+  ; CHECK:   [[TOP_INPUT:%[0-9]+]]:ep = COPY
+  ; CHECK-NOT: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK: bb.2.steady.stage1.top:
+  ; CHECK:   [[INPUT_PHI:%[0-9]+]]:ep = PHI [[TOP_INPUT]], %bb.1, {{%[0-9]+}}, %bb.4
+  ; CHECK-NOT: :vec512 = PHI
+  ; CHECK:   [[STEADY_LOAD:%[0-9]+]]:vec512, [[STEADY_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[INPUT_PHI]], 64
+  ; CHECK:   COPY [[STEADY_LOAD]]
+  ; CHECK:   COPY [[STEADY_ADDRESS]]
+  ; CHECK: bb.4.steady.stage1.bottom.and.stage0.top:
+  ; CHECK:   [[LATCH_INPUT:%[0-9]+]]:ep = COPY
+  ; CHECK-NOT: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK: bb.5.lastiter.stage1.top:
+  ; CHECK:   [[LAST_LOAD:%[0-9]+]]:vec512, [[LAST_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[LATCH_INPUT]], 64
+  ; CHECK:   COPY [[LAST_LOAD]]
+  ; CHECK:   COPY [[LAST_ADDRESS]]
   bb.0.entry:
     successors: %bb.1(0x80000000)
     liveins: $p0, $p1
@@ -131,13 +87,14 @@ body:             |
   bb.3.steady.inner:
     successors: %bb.3(0x40000000), %bb.4(0x40000000)
 
+    %17:ep = COPY %1
     PseudoLoopEnd <mcsymbol .L_steady_end>, %bb.3
     PseudoJ_jump_imm %bb.4
 
   bb.4.steady.stage1.bottom.and.stage0.top:
     successors: %bb.2(0x40000000), %bb.5(0x40000000)
 
-    %11:ep = COPY %1
+    %11:ep = COPY %17
     %9:vec512, %10:ep = VLD_x_pstm_nrm_imm_pseudo %11, 64 :: (load (<32 x s16>))
     %12:ep_as_32bit = MOVXM_lng_cg %bb.2
     %13:er = MOV_RLC_imm11_pseudo 1

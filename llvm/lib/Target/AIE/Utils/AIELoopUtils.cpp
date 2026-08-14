@@ -63,6 +63,11 @@ bool isOuterLoopPipelined(const MachineBasicBlock &LoopLatch) {
       .has_value();
 }
 
+bool hasDeferredOuterLoopStageSplit(const MachineBasicBlock &LoopLatch) {
+  return getLoopMetadata(getLoopID(LoopLatch), OuterLoopDeferredStageSplitKey)
+      .has_value();
+}
+
 bool isLoopVersioned(const MachineBasicBlock &LoopBlock) {
   // Positive value required, matching the IR side's reading of the request
   // hint it is derived from.

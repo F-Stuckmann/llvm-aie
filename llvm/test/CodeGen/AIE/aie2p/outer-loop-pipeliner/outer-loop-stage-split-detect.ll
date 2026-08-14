@@ -14,9 +14,13 @@
 ; RUN:     -aie-outer-loop-pipelining-skip-split \
 ; RUN:     -debug-only=aie-outer-loop-stage-split -o /dev/null %s 2>&1 \
 ; RUN:   | FileCheck %s
+; RUN: llc -mtriple=aie2p -O2 -aie-enable-outer-loop-pipelining \
+; RUN:     -debug-only=aie-outer-loop-stage-split -o /dev/null %s 2>&1 \
+; RUN:   | FileCheck %s --check-prefix=NO-DEFERRED --allow-empty
 
 ; CHECK: Found OLP Movement candidate: {{.*}} (steady.stage1.bottom.and.stage0.top)
 ; CHECK-NOT: Found OLP Movement candidate: {{.*}}no_loop
+; NO-DEFERRED-NOT: Found OLP Movement candidate
 
 define void @nested_loop_basic(ptr noalias %a, ptr noalias %b, ptr noalias %c,
                                i32 %N, i32 %M) {
