@@ -207,6 +207,12 @@
 ; AIE-O1-NEXT:      Remove dead machine instructions
 ; AIE-O1-NEXT:      AIE Post Select Optimizer
 ; AIE-O1-NEXT:      Remove dead machine instructions
+; AIE-O1-NEXT:      MachineDominator Tree Construction
+; AIE-O1-NEXT:      Machine Natural Loop Construction
+; AIE-O1-NEXT:      Lazy Machine Block Frequency Analysis
+; AIE-O1-NEXT:      Machine Optimization Remark Emitter
+; AIE-O1-NEXT:      Function Alias Analysis Results
+; AIE-O1-NEXT:      AIE Outer Loop Stage Split
 ; AIE-O1-NEXT:      ResetMachineFunction
 ; AIE-O1-NEXT:      Finalize ISel and expand pseudo-instructions
 ; AIE-O1-NEXT:      Lazy Machine Block Frequency Analysis
@@ -221,7 +227,6 @@
 ; AIE-O1-NEXT:      Machine Trace Metrics
 ; AIE-O1-NEXT:      Early If-Conversion
 ; AIE-O1-NEXT:      Machine Block Frequency Analysis
-; AIE-O1-NEXT:      Function Alias Analysis Results
 ; AIE-O1-NEXT:      Early Machine Loop Invariant Code Motion
 ; AIE-O1-NEXT:      Machine LICM for reserved regs
 ; AIE-O1-NEXT:      MachineDominator Tree Construction
@@ -440,6 +445,12 @@
 ; AIE-O23-NEXT:      Remove dead machine instructions
 ; AIE-O23-NEXT:      AIE Post Select Optimizer
 ; AIE-O23-NEXT:      Remove dead machine instructions
+; AIE-O23-NEXT:      MachineDominator Tree Construction
+; AIE-O23-NEXT:      Machine Natural Loop Construction
+; AIE-O23-NEXT:      Lazy Machine Block Frequency Analysis
+; AIE-O23-NEXT:      Machine Optimization Remark Emitter
+; AIE-O23-NEXT:      Function Alias Analysis Results
+; AIE-O23-NEXT:      AIE Outer Loop Stage Split
 ; AIE-O23-NEXT:      ResetMachineFunction
 ; AIE-O23-NEXT:      Finalize ISel and expand pseudo-instructions
 ; AIE-O23-NEXT:      Lazy Machine Block Frequency Analysis
@@ -454,7 +465,6 @@
 ; AIE-O23-NEXT:      Machine Trace Metrics
 ; AIE-O23-NEXT:      Early If-Conversion
 ; AIE-O23-NEXT:      Machine Block Frequency Analysis
-; AIE-O23-NEXT:      Function Alias Analysis Results
 ; AIE-O23-NEXT:      Early Machine Loop Invariant Code Motion
 ; AIE-O23-NEXT:      Machine LICM for reserved regs
 ; AIE-O23-NEXT:      MachineDominator Tree Construction

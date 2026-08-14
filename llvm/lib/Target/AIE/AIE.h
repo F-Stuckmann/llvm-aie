@@ -125,6 +125,10 @@ extern char &AIEOuterLoopPipelinerID;
 void initializeAIEOuterLoopPipelinerPass(PassRegistry &);
 llvm::FunctionPass *createAIEOuterLoopPipelinerPass();
 
+// Post-ISel consumer of the outer-loop pipeliner's skip-split CFG skeleton.
+void initializeAIEOuterLoopStageSplitPass(PassRegistry &);
+MachineFunctionPass *createAIEOuterLoopStageSplitPass();
+
 // Inner Loop Versioning (IR-level). Emits a runtime trip-count guard around a
 // pipelined copy of a single-block inner loop whose minimum trip count is too
 // small for the software pipeliner. See AIEInnerLoopVersioning.cpp.

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TARGET_AIE_AIELIVEREGS_H
 #define LLVM_LIB_TARGET_AIE_AIELIVEREGS_H
 
+#include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -24,6 +25,26 @@
 #include <set>
 
 namespace llvm::AIE {
+
+/// Track the physical registers defined over a range of instructions.
+class RegDefMap {
+  const TargetRegisterInfo &TRI;
+  DenseMap<MCRegister, MachineInstr *> UniqueDefs;
+  BitVector PhysRegChanged;
+
+public:
+  RegDefMap(const TargetRegisterInfo &TRI)
+      : TRI(TRI), PhysRegChanged(TRI.getNumRegs()) {}
+
+  /// Track every register that was changed by \p MI
+  void addChangedRegs(MachineInstr &MI);
+
+  /// Whether \p Reg or any of its aliases has been changed.
+  bool hasChanged(MCRegister Reg) const;
+
+  /// Whether \p Reg has been defined a single time.
+  MachineInstr *getUniqueDef(MCRegister Reg) const;
+};
 
 class LiveRegs {
   // Mapping from Machine Basic Blocks to their livein registers.

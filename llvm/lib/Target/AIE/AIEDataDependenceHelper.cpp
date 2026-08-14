@@ -35,6 +35,15 @@ DataDependenceHelper::DataDependenceHelper(const MachineSchedContext &Context,
   }
 }
 
+void DataDependenceHelper::buildGraph(MachineBasicBlock &MBB) {
+  clearDAG();
+  for (MachineInstr &MI : MBB)
+    if (!MI.isTerminator())
+      initSUnit(MI);
+  buildEdges();
+  makeMaps();
+}
+
 void DataDependenceHelper::buildEdges() {
   ScheduleDAGInstrs::buildEdges(Context.AA);
   for (auto &M : Mutations) {

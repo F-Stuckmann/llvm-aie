@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2025 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2025-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 //
@@ -44,7 +44,7 @@ AIEGlobalCombiner::getCombiners(MachineBasicBlock &MBB) {
 void AIEGlobalCombiner::generateCombiners(MachineBasicBlock &MBB) {
   clear();
 
-  GlobalCombiner::initDAG(DAG, MBB);
+  DAG.buildGraph(MBB);
 
   for (auto &SUnit : DAG.SUnits) {
 
@@ -837,20 +837,6 @@ void Combiner::dumpFull(unsigned *GlobalID, CombinerGain *Gain) const {
       dbgs() << "                          " << *MI;
   }
   dbgs() << "}\n";
-}
-
-// ---------------------------------------------------------------------------//
-
-void GlobalCombiner::initDAG(AIE::DataDependenceHelper &DAG,
-                             MachineBasicBlock &MBB) {
-  DAG.clearDAG();
-  for (auto &MI : MBB) {
-    if (!MI.isTerminator()) {
-      DAG.initSUnit(MI);
-    }
-  }
-  DAG.buildEdges();
-  DAG.makeMaps();
 }
 
 raw_ostream &operator<<(raw_ostream &OS, const CombinerGain &Val) {

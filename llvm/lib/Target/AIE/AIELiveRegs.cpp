@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 // Implementations of the classes used to support Liveness Analysis of all
@@ -18,6 +18,36 @@
 using namespace llvm;
 
 namespace llvm::AIE {
+
+void RegDefMap::addChangedRegs(MachineInstr &MI) {
+  for (const MachineOperand &MO : MI.operands()) {
+    if (MO.isRegMask()) {
+      PhysRegChanged.setBitsNotInMask(MO.getRegMask());
+      UniqueDefs.clear();
+    } else if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical()) {
+      MCRegister Reg = MO.getReg();
+      if (!PhysRegChanged.test(Reg)) {
+        assert(!UniqueDefs.contains(Reg));
+        UniqueDefs[Reg] = &MI;
+      } else {
+        UniqueDefs.erase(Reg);
+      }
+      PhysRegChanged.set(Reg);
+    }
+  }
+}
+
+bool RegDefMap::hasChanged(MCRegister Reg) const {
+  assert(range_size(TRI.regunits(Reg)) == 1 && "Phys reg has aliases.");
+  return PhysRegChanged.test(Reg);
+}
+
+MachineInstr *RegDefMap::getUniqueDef(MCRegister Reg) const {
+  assert(range_size(TRI.regunits(Reg)) == 1 && "Phys reg has aliases.");
+  if (auto It = UniqueDefs.find(Reg); It != UniqueDefs.end())
+    return It->second;
+  return nullptr;
+}
 
 void LiveRegs::addToWorkList(const MachineBasicBlock *MBB) {
   auto It = InWorkList.find(MBB);

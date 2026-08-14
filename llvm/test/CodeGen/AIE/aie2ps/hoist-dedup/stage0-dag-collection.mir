@@ -5,8 +5,8 @@
 #
 # (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
 #
-# Capture the all-stage-0 form with paired long-latency loads and result PHIs.
-# The stage-split implementation will use this as its focused input fixture.
+# A long-latency load moves once into each stage-1 top. Its result PHIs are
+# removed, and its newly exposed pointer operand gets a steady input PHI.
 #
 # RUN: llc -mtriple=aie2ps -run-pass=aie-outer-loop-stage-split \
 # RUN:     -verify-machineinstrs -o - %s | FileCheck %s
@@ -33,8 +33,9 @@
     unreachable
   }
 
-  !0 = distinct !{!0, !1}
+  !0 = distinct !{!0, !1, !2}
   !1 = !{!"llvm.loop.hint.aie_outerloop_pipeliner_success", i64 1}
+  !2 = !{!"llvm.loop.hint.aie_outerloop_pipeliner_deferred_stage_split", i64 1}
 ...
 ---
 name:            stage0_dag_collection
@@ -55,16 +56,15 @@ body:             |
   ; CHECK-NEXT:   successors: %bb.2(0x80000000)
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   [[COPY2:%[0-9]+]]:ep = COPY [[COPY]]
-  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo1:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[COPY2]], 64 :: (load (<32 x s16>))
   ; CHECK-NEXT:   PseudoJ_jump_imm %bb.2
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.2.steady.stage1.top:
   ; CHECK-NEXT:   successors: %bb.3(0x80000000)
   ; CHECK-NEXT: {{  $}}
-  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:vec512 = PHI [[VLD_x_pstm_nrm_imm_pseudo]], %bb.1, %6, %bb.4
-  ; CHECK-NEXT:   [[PHI1:%[0-9]+]]:ep = PHI [[VLD_x_pstm_nrm_imm_pseudo1]], %bb.1, %8, %bb.4
-  ; CHECK-NEXT:   [[COPY3:%[0-9]+]]:vec512 = COPY [[PHI]]
-  ; CHECK-NEXT:   [[COPY4:%[0-9]+]]:ep = COPY [[PHI1]]
+  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:ep = PHI [[COPY2]], %bb.1, %11, %bb.4
+  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo1:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[PHI]], 64 :: (load (<32 x s16>))
+  ; CHECK-NEXT:   [[COPY3:%[0-9]+]]:vec512 = COPY [[VLD_x_pstm_nrm_imm_pseudo]]
+  ; CHECK-NEXT:   [[COPY4:%[0-9]+]]:ep = COPY [[VLD_x_pstm_nrm_imm_pseudo1]]
   ; CHECK-NEXT:   PseudoJ_jump_imm %bb.3
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.3.steady.inner:
@@ -77,7 +77,6 @@ body:             |
   ; CHECK-NEXT:   successors: %bb.2(0x40000000), %bb.5(0x40000000)
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   [[COPY5:%[0-9]+]]:ep = COPY [[COPY1]]
-  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo2:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo3:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[COPY5]], 64 :: (load (<32 x s16>))
   ; CHECK-NEXT:   [[MOVXM_lng_cg:%[0-9]+]]:ep_as_32bit = MOVXM_lng_cg %bb.2
   ; CHECK-NEXT:   [[MOV_RLC_imm11_pseudo:%[0-9]+]]:er = MOV_RLC_imm11_pseudo 1
   ; CHECK-NEXT:   [[LoopDec:%[0-9]+]]:er = LoopDec [[MOV_RLC_imm11_pseudo]], implicit-def $srcarry
@@ -87,6 +86,7 @@ body:             |
   ; CHECK-NEXT: bb.5.lastiter.stage1.top:
   ; CHECK-NEXT:   successors: %bb.6(0x80000000)
   ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo2:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo3:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[COPY5]], 64 :: (load (<32 x s16>))
   ; CHECK-NEXT:   [[COPY6:%[0-9]+]]:vec512 = COPY [[VLD_x_pstm_nrm_imm_pseudo2]]
   ; CHECK-NEXT:   [[COPY7:%[0-9]+]]:ep = COPY [[VLD_x_pstm_nrm_imm_pseudo3]]
   ; CHECK-NEXT:   PseudoJ_jump_imm %bb.6

@@ -45,6 +45,7 @@ protected:
 public:
   DataDependenceHelper(const MachineSchedContext &Context, bool AddMutators,
                        bool ExactLatencies);
+  void buildGraph(MachineBasicBlock &MBB);
   void buildEdges();
 
   // Compute the maximum depth of all nodes. The depth is the earliest cycle

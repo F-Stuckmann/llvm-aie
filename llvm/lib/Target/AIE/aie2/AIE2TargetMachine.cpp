@@ -120,6 +120,7 @@ bool AIE2PassConfig::addGlobalInstructionSelect() {
     addPass(createAIEPostSelectOptimize());
     addPass(
         createDeadMachineInstructionElim(/*KeepLifetimeInstructions=*/true));
+    addPass(createAIEOuterLoopStageSplitPass());
     if (EnableReservedRegsLICM) {
       /// Try and hoist assignments to reserved registers out of loops.
       insertPass(&EarlyMachineLICMID, &ReservedRegsLICMID);

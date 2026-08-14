@@ -273,8 +273,6 @@ struct LatchConditionInfo {
 
 class LoopStructure {
 protected:
-  BasicBlock *InnerExit = nullptr;
-
   SmallVector<BasicBlock *, 4> InnerLoopBlocks;
 
   MDNode *OuterLoopID = nullptr;
@@ -301,7 +299,7 @@ public:
   BasicBlock *getInnerHeader() const { return InnerLoopBlocks.front(); }
   // The single inner-loop predecessor of the inner header (single-latch form).
   BasicBlock *getInnerLatch() const;
-  BasicBlock *getInnerExit() const { return InnerExit; }
+  BasicBlock *getInnerExit() const { return getBottom(); }
   ArrayRef<BasicBlock *> getInnerBlocks() const { return InnerLoopBlocks; }
   MDNode *getOuterLoopID() const { return OuterLoopID; }
 
@@ -750,7 +748,6 @@ bool OrigLoopStructure::analyzeLoopStructure() {
   }
 
   // Populate the top/bottom regions and the derived-field backing state.
-  InnerExit = InnerLoop->getExitBlock();
   InnerLoopBlocks.assign(InnerLoop->block_begin(), InnerLoop->block_end());
   OuterLoopID = OuterLoop->getLoopID();
   TopRegion.assign({OuterLoop->getHeader()});
@@ -1133,7 +1130,6 @@ CloneLoopStructure::CloneLoopStructure(const LoopStructure &Src,
   // originals for the caller to rewire (they are absent from CloneMap).
   remapInstructionsInBlocks(CloneBlocks, CloneMap);
 
-  InnerExit = clonedBlock(Src.getInnerExit());
   for (BasicBlock *BB : Src.getInnerBlocks())
     InnerLoopBlocks.push_back(clonedBlock(BB));
   OuterLoopID = Src.getOuterLoopID();
@@ -1190,7 +1186,6 @@ CloneLoopStructure::CloneLoopStructure(const LoopStructure &Src) {
   if (Src.getInnerExit() == Src.getBottom())
     CloneMap[Src.getInnerExit()] = LastIterBottom;
 
-  InnerExit = LastIterBottom;
   TopRegion.assign({LastIterTop});
   BottomRegion.assign({LastIterBottom});
 }

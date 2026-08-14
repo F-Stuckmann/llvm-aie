@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2024 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2024-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AIE.h"
+#include "AIELiveRegs.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -30,55 +31,7 @@ using namespace llvm;
 
 namespace {
 
-/// Track registers that have been defined/changed
-class RegDefMap {
-  const TargetRegisterInfo &TRI;
-  DenseMap<MCRegister, MachineInstr *> UniqueDefs;
-  BitVector PhysRegChanged;
-
-public:
-  RegDefMap(const TargetRegisterInfo &TRI)
-      : TRI(TRI), PhysRegChanged(TRI.getNumRegs()) {}
-
-  /// Track every register that was changed by \p MI
-  void addChangedRegs(MachineInstr &MI);
-
-  /// Whether \p Reg or any of its aliases has been changed.
-  bool hasChanged(MCRegister Reg) const;
-
-  /// Whether \p Reg has been defined a single time.
-  MachineInstr *getUniqueDef(MCRegister Reg) const;
-};
-
-void RegDefMap::addChangedRegs(MachineInstr &MI) {
-  for (const MachineOperand &MO : MI.operands()) {
-    if (MO.isRegMask()) {
-      PhysRegChanged.setBitsNotInMask(MO.getRegMask());
-      UniqueDefs.clear();
-    } else if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical()) {
-      MCRegister Reg = MO.getReg();
-      if (!PhysRegChanged.test(Reg)) {
-        assert(!UniqueDefs.contains(Reg));
-        UniqueDefs[Reg] = &MI;
-      } else {
-        UniqueDefs.erase(Reg);
-      }
-      PhysRegChanged.set(Reg);
-    }
-  }
-}
-
-bool RegDefMap::hasChanged(MCRegister Reg) const {
-  assert(range_size(TRI.regunits(Reg)) == 1 && "Phys reg has aliases.");
-  return PhysRegChanged.test(Reg);
-}
-
-MachineInstr *RegDefMap::getUniqueDef(MCRegister Reg) const {
-  assert(range_size(TRI.regunits(Reg)) == 1 && "Phys reg has aliases.");
-  if (auto It = UniqueDefs.find(Reg); It != UniqueDefs.end())
-    return It->second;
-  return nullptr;
-}
+using AIE::RegDefMap;
 
 /// Information about a register and its defining instruction that is
 /// a candidate for hoisting/sinking.

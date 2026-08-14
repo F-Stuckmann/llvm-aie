@@ -13,10 +13,10 @@
 ; RUN: llc -mtriple=aie2p -O2 -aie-enable-outer-loop-pipelining \
 ; RUN:     -aie-outer-loop-pipelining-skip-split \
 ; RUN:     -debug-only=aie-outer-loop-stage-split -o /dev/null %s 2>&1 \
-; RUN:   | FileCheck %s --allow-empty
+; RUN:   | FileCheck %s
 
-; Baseline: without the AIEOuterLoopStageSplit pass nothing is reported.
-; CHECK-NOT: Found OLP Movement candidate
+; CHECK: Found OLP Movement candidate: {{.*}} (steady.stage1.bottom.and.stage0.top)
+; CHECK-NOT: Found OLP Movement candidate: {{.*}}no_loop
 
 define void @nested_loop_basic(ptr noalias %a, ptr noalias %b, ptr noalias %c,
                                i32 %N, i32 %M) {
