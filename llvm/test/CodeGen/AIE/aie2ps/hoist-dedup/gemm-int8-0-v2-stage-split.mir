@@ -1998,6 +1998,19 @@ constants:       []
 machineFunctionInfo:
   varArgsFrameIndex: 0
 body:             |
+  ; CHECK-LABEL: name: gemm_int8_0_v2
+  ; CHECK: bb.{{[0-9]+}}.lastiter.stage1.top:
+  ; CHECK: VMUL_vmul_vmul_cm_core_X_X
+  ; CHECK: bb.{{[0-9]+}}.stage0.top:
+  ; CHECK: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK-NOT: VMUL_vmul_vmul_cm_core_X_X
+  ; CHECK: bb.{{[0-9]+}}.steady.stage1.top:
+  ; CHECK: PHI
+  ; CHECK: VMUL_vmul_vmul_cm_core_X_X
+  ; CHECK: bb.{{[0-9]+}}.steady.stage1.bottom.and.stage0.top:
+  ; CHECK: VLD_x_pstm_nrm_imm_pseudo
+  ; CHECK-NOT: VMUL_vmul_vmul_cm_core_X_X
+  ; CHECK: LoopJNZ
   bb.1.entry:
     successors: %bb.3(0x30000000), %bb.2(0x50000000)
     liveins: $p0, $p1, $p2, $p3, $p4, $p5
