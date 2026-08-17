@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineSSAUpdater.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/InitializePasses.h"
@@ -67,7 +68,6 @@ struct DependencyContext : MachineSchedContext {
 class StageSplitLoop {
   MachineFunction &MF;
   MachineRegisterInfo &MRI;
-  const TargetInstrInfo &TII;
   MachineBasicBlock &Stage0Top;
   MachineBasicBlock &SteadyTop;
   MachineBasicBlock &SteadyBottom;
@@ -79,18 +79,21 @@ class StageSplitLoop {
   SmallVector<InstructionPair> Pairs;
   DenseMap<const MachineInstr *, unsigned> PairIndices;
   DenseSet<std::pair<Register, Register>> CorrespondingRegs;
+  /// The SteadyTop PHI merging each (stage-0, steady) register pair.
+  DenseMap<std::pair<Register, Register>, MachineInstr *> MergePHIs;
   DenseSet<unsigned> Selected;
-  DenseMap<Register, Register> SteadyDefs;
+  /// Old register -> its replacement defined in SteadyTop. Keyed both by the
+  /// stage-0 definitions that moved and by the merge PHIs they made redundant.
+  DenseMap<Register, Register> SteadyRewrite;
   DenseMap<Register, Register> LastIterationDefs;
-  DenseMap<Register, Register> ReplacedPHIs;
+  SmallVector<MachineInstr *, 8> ReplacedMergePHIs;
 
 public:
   StageSplitLoop(MachineFunction &MF, const MachineLoopInfo &MLI, AAResults &AA,
                  const StageSplitBlocks &Blocks)
-      : MF(MF), MRI(MF.getRegInfo()), TII(*MF.getSubtarget().getInstrInfo()),
-        Stage0Top(*Blocks.Stage0Top), SteadyTop(*Blocks.SteadyTop),
-        SteadyBottom(*Blocks.SteadyBottom), LastIterTop(*Blocks.LastIterTop),
-        DAGContext(MF, MLI, AA),
+      : MF(MF), MRI(MF.getRegInfo()), Stage0Top(*Blocks.Stage0Top),
+        SteadyTop(*Blocks.SteadyTop), SteadyBottom(*Blocks.SteadyBottom),
+        LastIterTop(*Blocks.LastIterTop), DAGContext(MF, MLI, AA),
         Stage0DAG(DAGContext, /*AddMutators=*/true, /*ExactLatencies=*/true),
         SteadyDAG(DAGContext, /*AddMutators=*/true, /*ExactLatencies=*/true) {
     collectLastIterationBlocks(MLI);
@@ -154,8 +157,8 @@ private:
     return haveCompatibleRegisters(TopReg, LatchReg);
   }
 
-  /// Whether the two instructions read the same values under the register
-  /// correspondence so far. Only valid once haveEquivalentShape passed.
+  /// Whether both instructions read the same values under the correspondence
+  /// established so far. Only meaningful after haveEquivalentShape passed.
   bool haveCorrespondingRegisters(const MachineInstr &TopMI,
                                   const MachineInstr &LatchMI) const {
     for (auto [TopMO, LatchMO] :
@@ -219,8 +222,10 @@ private:
   void collectRegisterCorrespondence() {
     for (MachineInstr &PHI : SteadyTop.phis()) {
       auto Inputs = getPHIInputs(PHI);
-      if (Inputs)
-        collectRegisterPair(Inputs->first, Inputs->second);
+      if (!Inputs)
+        continue;
+      MergePHIs.try_emplace(*Inputs, &PHI);
+      collectRegisterPair(Inputs->first, Inputs->second);
     }
   }
 
@@ -340,12 +345,7 @@ private:
   }
 
   MachineInstr *findMergePHI(Register TopReg, Register LatchReg) const {
-    for (MachineInstr &PHI : SteadyTop.phis()) {
-      auto Inputs = getPHIInputs(PHI);
-      if (Inputs && Inputs->first == TopReg && Inputs->second == LatchReg)
-        return &PHI;
-    }
-    return nullptr;
+    return MergePHIs.lookup({TopReg, LatchReg});
   }
 
   bool isSelectedInstruction(const MachineInstr *MI) const {
@@ -383,22 +383,19 @@ private:
     return true;
   }
 
+  /// The name a moved instruction reads in the steady header: an earlier moved
+  /// definition, else the value merged out of Stage0Top and SteadyBottom.
   Register getOrCreateSteadyInput(Register TopReg, Register LatchReg) {
     if (TopReg == LatchReg)
       return TopReg;
-    if (Register Moved = SteadyDefs.lookup(TopReg))
-      return Moved;
-    if (MachineInstr *PHI = findMergePHI(TopReg, LatchReg))
-      return PHI->getOperand(0).getReg();
+    if (Register Rewritten = SteadyRewrite.lookup(TopReg))
+      return Rewritten;
 
-    Register NewReg = MRI.cloneVirtualRegister(TopReg);
-    BuildMI(SteadyTop, SteadyTop.getFirstNonPHI(), DebugLoc(),
-            TII.get(TargetOpcode::PHI), NewReg)
-        .addReg(TopReg)
-        .addMBB(&Stage0Top)
-        .addReg(LatchReg)
-        .addMBB(&SteadyBottom);
-    return NewReg;
+    MachineSSAUpdater SSA(MF);
+    SSA.Initialize(TopReg);
+    SSA.AddAvailableValue(&Stage0Top, TopReg);
+    SSA.AddAvailableValue(&SteadyBottom, LatchReg);
+    return SSA.GetValueInMiddleOfBlock(&SteadyTop);
   }
 
   void remapUses(InstructionPair &Pair, MachineInstr &SteadyMI,
@@ -415,7 +412,7 @@ private:
       SteadyMO.setReg(getOrCreateSteadyInput(TopReg, LatchReg));
       if (Register Moved = LastIterationDefs.lookup(LatchReg))
         LastMO.setReg(Moved);
-      else if (Register Rewritten = ReplacedPHIs.lookup(LatchReg))
+      else if (Register Rewritten = SteadyRewrite.lookup(LatchReg))
         LastMO.setReg(Rewritten);
     }
   }
@@ -435,10 +432,12 @@ private:
       Register LastReg = MRI.cloneVirtualRegister(LatchReg);
       SteadyMO.setReg(SteadyReg);
       LastMO.setReg(LastReg);
-      SteadyDefs[TopReg] = SteadyReg;
+      SteadyRewrite[TopReg] = SteadyReg;
       LastIterationDefs[LatchReg] = LastReg;
-      if (MachineInstr *PHI = findMergePHI(TopReg, LatchReg))
-        ReplacedPHIs[PHI->getOperand(0).getReg()] = SteadyReg;
+      if (MachineInstr *PHI = findMergePHI(TopReg, LatchReg)) {
+        SteadyRewrite[PHI->getOperand(0).getReg()] = SteadyReg;
+        ReplacedMergePHIs.push_back(PHI);
+      }
     }
   }
 
@@ -471,10 +470,9 @@ private:
   }
 
   void replaceOutputPHIs() {
-    for (auto [OldReg, NewReg] : ReplacedPHIs) {
-      MachineInstr *PHI = MRI.getVRegDef(OldReg);
-      assert(PHI && PHI->isPHI());
-      MRI.replaceRegWith(OldReg, NewReg);
+    for (MachineInstr *PHI : ReplacedMergePHIs) {
+      Register OldReg = PHI->getOperand(0).getReg();
+      MRI.replaceRegWith(OldReg, SteadyRewrite.lookup(OldReg));
       PHI->eraseFromParent();
     }
   }

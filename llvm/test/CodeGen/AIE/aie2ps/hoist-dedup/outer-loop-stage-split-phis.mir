@@ -44,27 +44,76 @@ selected:        true
 tracksRegLiveness: true
 body:             |
   ; CHECK-LABEL: name: phi_rewrites
-  ; CHECK: [[SHARED:%[0-9]+]]:vec512 = IMPLICIT_DEF
-  ; CHECK: bb.1.stage0.top:
-  ; CHECK: [[TOP_LOAD:%[0-9]+]]:vec512, [[TOP_ADDRESS:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo
-  ; CHECK: [[TOP_LOCK:%[0-9]+]]:mlockid_reg = MOV_RLC_imm11_pseudo 0
-  ; CHECK-NOT: VSHUFFLE_vec_shuffle_x
-  ; CHECK: bb.2.steady.stage1.top:
-  ; CHECK: [[LIVE_PHI:%[0-9]+]]:ep = PHI [[TOP_ADDRESS]], %bb.1, [[LATCH_ADDRESS:%[0-9]+]], %bb.4
-  ; CHECK: [[LOAD_PHI:%[0-9]+]]:vec512 = PHI [[TOP_LOAD]], %bb.1, [[LATCH_LOAD:%[0-9]+]], %bb.4
-  ; CHECK: [[LOCK_PHI:%[0-9]+]]:mlockid_reg = PHI [[TOP_LOCK]], %bb.1, [[LATCH_LOCK:%[0-9]+]], %bb.4
-  ; CHECK-NOT: = PHI
-  ; CHECK: [[STEADY_SHUFFLE:%[0-9]+]]:vec512 = VSHUFFLE_vec_shuffle_x [[LOAD_PHI]], [[SHARED]], [[LOCK_PHI]]
-  ; CHECK: [[STEADY_COPY:%[0-9]+]]:vec512 = COPY [[STEADY_SHUFFLE]]
-  ; CHECK: COPY [[STEADY_COPY]]
-  ; CHECK: bb.4.steady.stage1.bottom.and.stage0.top:
-  ; CHECK: [[LATCH_LOAD]]:vec512, [[LATCH_ADDRESS]]:ep = VLD_x_pstm_nrm_imm_pseudo
-  ; CHECK: [[LATCH_LOCK]]:mlockid_reg = MOV_RLC_imm11_pseudo 0
-  ; CHECK-NOT: VSHUFFLE_vec_shuffle_x
-  ; CHECK: bb.5.lastiter.stage1.top:
-  ; CHECK: [[LAST_SHUFFLE:%[0-9]+]]:vec512 = VSHUFFLE_vec_shuffle_x [[LATCH_LOAD]], [[SHARED]], [[LATCH_LOCK]]
-  ; CHECK: [[LAST_COPY:%[0-9]+]]:vec512 = COPY [[LAST_SHUFFLE]]
-  ; CHECK: COPY [[LAST_COPY]]
+  ; CHECK: bb.0.entry:
+  ; CHECK-NEXT:   successors: %bb.1(0x80000000)
+  ; CHECK-NEXT:   liveins: $p0, $p1
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[COPY:%[0-9]+]]:ep = COPY $p0
+  ; CHECK-NEXT:   [[COPY1:%[0-9]+]]:ep = COPY $p1
+  ; CHECK-NEXT:   [[DEF:%[0-9]+]]:vec512 = IMPLICIT_DEF
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.1
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.1.stage0.top:
+  ; CHECK-NEXT:   successors: %bb.2(0x80000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo1:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[COPY]], 64 :: (load (<32 x s16>))
+  ; CHECK-NEXT:   [[MOV_RLC_imm11_pseudo:%[0-9]+]]:mlockid_reg = MOV_RLC_imm11_pseudo 0
+  ; CHECK-NEXT:   [[DEF1:%[0-9]+]]:vec512 = IMPLICIT_DEF
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.2
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.2.steady.stage1.top:
+  ; CHECK-NEXT:   successors: %bb.3(0x80000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[PHI:%[0-9]+]]:mlockid_reg = PHI [[MOV_RLC_imm11_pseudo]], %bb.1, %19, %bb.4
+  ; CHECK-NEXT:   [[PHI1:%[0-9]+]]:vec512 = PHI [[VLD_x_pstm_nrm_imm_pseudo]], %bb.1, %18, %bb.4
+  ; CHECK-NEXT:   [[PHI2:%[0-9]+]]:ep = PHI [[VLD_x_pstm_nrm_imm_pseudo1]], %bb.1, %12, %bb.4
+  ; CHECK-NEXT:   [[VSHUFFLE_vec_shuffle_x:%[0-9]+]]:vec512 = VSHUFFLE_vec_shuffle_x [[PHI1]], [[DEF]], [[PHI]]
+  ; CHECK-NEXT:   [[COPY2:%[0-9]+]]:vec512 = COPY [[VSHUFFLE_vec_shuffle_x]]
+  ; CHECK-NEXT:   [[COPY3:%[0-9]+]]:vec512 = COPY [[COPY2]]
+  ; CHECK-NEXT:   [[COPY4:%[0-9]+]]:ep = COPY [[PHI2]]
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.3
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.3.steady.inner:
+  ; CHECK-NEXT:   successors: %bb.3(0x40000000), %bb.4(0x40000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[COPY5:%[0-9]+]]:ep = COPY [[COPY1]]
+  ; CHECK-NEXT:   PseudoLoopEnd <mcsymbol .L_steady_end>, %bb.3
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.4
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.4.steady.stage1.bottom.and.stage0.top:
+  ; CHECK-NEXT:   successors: %bb.2(0x40000000), %bb.5(0x40000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[VLD_x_pstm_nrm_imm_pseudo2:%[0-9]+]]:vec512, [[VLD_x_pstm_nrm_imm_pseudo3:%[0-9]+]]:ep = VLD_x_pstm_nrm_imm_pseudo [[COPY5]], 64 :: (load (<32 x s16>))
+  ; CHECK-NEXT:   [[MOV_RLC_imm11_pseudo1:%[0-9]+]]:mlockid_reg = MOV_RLC_imm11_pseudo 0
+  ; CHECK-NEXT:   [[DEF2:%[0-9]+]]:vec512 = IMPLICIT_DEF
+  ; CHECK-NEXT:   [[MOVXM_lng_cg:%[0-9]+]]:ep_as_32bit = MOVXM_lng_cg %bb.2
+  ; CHECK-NEXT:   [[MOV_RLC_imm11_pseudo2:%[0-9]+]]:er = MOV_RLC_imm11_pseudo 1
+  ; CHECK-NEXT:   [[LoopDec:%[0-9]+]]:er = LoopDec [[MOV_RLC_imm11_pseudo2]], implicit-def $srcarry
+  ; CHECK-NEXT:   LoopJNZ [[LoopDec]], [[MOVXM_lng_cg]]
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.5
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.5.lastiter.stage1.top:
+  ; CHECK-NEXT:   successors: %bb.6(0x80000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   [[VSHUFFLE_vec_shuffle_x1:%[0-9]+]]:vec512 = VSHUFFLE_vec_shuffle_x [[VLD_x_pstm_nrm_imm_pseudo2]], [[DEF]], [[MOV_RLC_imm11_pseudo1]]
+  ; CHECK-NEXT:   [[COPY6:%[0-9]+]]:vec512 = COPY [[VSHUFFLE_vec_shuffle_x1]]
+  ; CHECK-NEXT:   [[COPY7:%[0-9]+]]:vec512 = COPY [[COPY6]]
+  ; CHECK-NEXT:   [[COPY8:%[0-9]+]]:ep = COPY [[VLD_x_pstm_nrm_imm_pseudo3]]
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.6
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.6.lastiter.inner:
+  ; CHECK-NEXT:   successors: %bb.6(0x40000000), %bb.7(0x40000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   PseudoLoopEnd <mcsymbol .L_lastiter_end>, %bb.6
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.7
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.7.lastiter.stage1.bottom:
+  ; CHECK-NEXT:   successors: %bb.8(0x80000000)
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT:   PseudoJ_jump_imm %bb.8
+  ; CHECK-NEXT: {{  $}}
+  ; CHECK-NEXT: bb.8.exit:
+  ; CHECK-NEXT:   PseudoRET implicit $lr
   bb.0.entry:
     successors: %bb.1(0x80000000)
     liveins: $p0, $p1

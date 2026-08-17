@@ -232,7 +232,7 @@ define dso_local void @gemm_int8_0_v2(ptr noalias %p_a, ptr noalias %p_b, ptr no
 ; SPLIT-ASM-LABEL: gemm_int8_0_v2:
 ; SPLIT-ASM:       // %bb.0: // %entry
 ; SPLIT-ASM-NEXT:    paddxm [sp], #64; nopx
-; SPLIT-ASM-NEXT:    vlda.ups.2x bmll2, s0, upssign1, [p3, #0]; mov dj0, #37
+; SPLIT-ASM-NEXT:    vlda.ups.2x bmll1, s0, upssign1, [p3, #0]; mov dj0, #37
 ; SPLIT-ASM-NEXT:    lda.u8 r2, [p5, dj0]; mov m0, #48
 ; SPLIT-ASM-NEXT:    padda [p5], m0; mov m2, #-44
 ; SPLIT-ASM-NEXT:    lda.u8 r18, [p5], m2
@@ -279,63 +279,63 @@ define dso_local void @gemm_int8_0_v2(ptr noalias %p_a, ptr noalias %p_b, ptr no
 ; SPLIT-ASM-NEXT:    // Child Loop BB0_2 Depth 2
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cmh5, s0, upssign1, [p4], #64; nopb ; nops ; nopxm ; nopv
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cml3, s0, upssign1, [p4], #64; nopx
-; SPLIT-ASM-NEXT:    vlda.ups.2x cmh3, s0, upssign1, [p4], #64; vsrs.2x wl10, bmll2, s1, srssign1
-; SPLIT-ASM-NEXT:    vlda.ups.2x cml1, s0, upssign1, [p4], #64; vldb.3d x3, [p1], d1
-; SPLIT-ASM-NEXT:    vlda.ups.2x cmh1, s0, upssign1, [p4], #64; movxm ls, #.LBB0_2
+; SPLIT-ASM-NEXT:    vlda.ups.2x cmh3, s0, upssign1, [p4], #64; vsrs.2x wl10, bmll1, s1, srssign1
+; SPLIT-ASM-NEXT:    vlda.ups.2x cml2, s0, upssign1, [p4], #64; vldb.3d x3, [p1], d1
+; SPLIT-ASM-NEXT:    vlda.ups.2x cmh2, s0, upssign1, [p4], #64; movxm ls, #.LBB0_2
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cml0, s0, upssign1, [p4], #64; vldb.3d x1, [p0], d0; vshuffle x8, x8, x0, r1
-; SPLIT-ASM-NEXT:    vlda.ups.2x cmh0, s0, upssign1, [p4], #64; vldb x9, [p1], m4; vsel.32 x2, x2, x10, r17
+; SPLIT-ASM-NEXT:    vlda.ups.2x cmh0, s0, upssign1, [p4], #64; vldb x9, [p1], m4; vsel.32 x4, x4, x10, r17
 ; SPLIT-ASM-NEXT:    vlda.3d x7, [p1], d1; vshuffle x8, x8, x0, r24
-; SPLIT-ASM-NEXT:    vldb x5, [p0], #64; vshift x10, x10, x0, r5; vmul dm2, x0, x2, r12
-; SPLIT-ASM-NEXT:    vlda.3d x3, [p0], d0; vsel.32 x4, x4, x10, r17
-; SPLIT-ASM-NEXT:    vldb x9, [p1], m4; vshuffle x10, x3, x0, r26; vaddmac dm5, dm5, dm2, x6, x8, r10
-; SPLIT-ASM-NEXT:    vlda.3d x7, [p1], d1; vshuffle x8, x10, x0, r22; vmul dm2, x0, x4, r12
-; SPLIT-ASM-NEXT:    vldb x5, [p0], #64; movxm le, #.L_LEnd1; vaddmac dm3, dm3, dm2, x1, x8, r10
-; SPLIT-ASM-NEXT:    vlda.3d x3, [p0], d0; vshuffle x1, x9, x0, r2; vaddmac dm0, dm0, dm2, x1, x8, r10
+; SPLIT-ASM-NEXT:    vldb x5, [p0], #64; vshift x10, x10, x0, r5; vmul dm1, x0, x4, r12
+; SPLIT-ASM-NEXT:    vlda.3d x3, [p0], d0; vsel.32 x2, x2, x10, r17
+; SPLIT-ASM-NEXT:    vldb x9, [p1], m4; vshuffle x10, x3, x0, r26; vaddmac dm5, dm5, dm1, x6, x8, r10
+; SPLIT-ASM-NEXT:    vlda.3d x7, [p1], d1; vshuffle x8, x10, x0, r22; vmul dm1, x0, x2, r12
+; SPLIT-ASM-NEXT:    vldb x5, [p0], #64; movxm le, #.L_LEnd1; vaddmac dm3, dm3, dm1, x1, x8, r10
+; SPLIT-ASM-NEXT:    vlda.3d x3, [p0], d0; vshuffle x1, x9, x0, r2; vaddmac dm0, dm0, dm1, x1, x8, r10
 ; SPLIT-ASM-NEXT:    nopa ; vldb x9, [p1], m4; nops ; add.nc lc, r30, #-3; vshuffle x10, x1, x0, r4; nopv
-; SPLIT-ASM-NEXT:    vlda.3d x7, [p1], d1; nopb ; nops ; nopx ; vshuffle x8, x7, x0, r6; vaddmac dm1, dm1, dm2, x6, x8, r10
+; SPLIT-ASM-NEXT:    vlda.3d x7, [p1], d1; nopb ; nops ; nopx ; vshuffle x8, x7, x0, r6; vaddmac dm2, dm2, dm1, x6, x8, r10
 ; SPLIT-ASM-NEXT:    nopa ; vldb x5, [p0], #64; nops ; nopx ; vshuffle x6, x8, x0, r16; vmac dm5, dm5, x5, x10, r8
 ; SPLIT-ASM-NEXT:    vlda.3d x3, [p0], d0; nopb ; nops ; nopx ; vshuffle x1, x9, x0, r2; vmac dm3, dm3, x3, x10, r8
 ; SPLIT-ASM-NEXT:  .LBB0_2: // %steady.stage1.inner.for.body99
 ; SPLIT-ASM-NEXT:    // Parent Loop BB0_1 Depth=1
 ; SPLIT-ASM-NEXT:    // => This Inner Loop Header: Depth=2
-; SPLIT-ASM-NEXT:    nopa ; vldb x9, [p1], m4; nops ; nopx ; vshuffle x10, x1, x0, r4; vmac dm1, dm1, x5, x6, r8
+; SPLIT-ASM-NEXT:    nopa ; vldb x9, [p1], m4; nops ; nopx ; vshuffle x10, x1, x0, r4; vmac dm2, dm2, x5, x6, r8
 ; SPLIT-ASM-NEXT:    vlda.3d x7, [p1], d1; nopb ; nops ; nopx ; vshuffle x8, x7, x0, r6; vmac dm0, dm0, x3, x6, r8
 ; SPLIT-ASM-NEXT:    nopa ; vldb x5, [p0], #64; nops ; nopx ; vshuffle x6, x8, x0, r16; vmac dm5, dm5, x5, x10, r8
 ; SPLIT-ASM-NEXT:  .L_LEnd1:
 ; SPLIT-ASM-NEXT:    vlda.3d x3, [p0], d0; nopb ; nops ; nopx ; vshuffle x1, x9, x0, r2; vmac dm3, dm3, x3, x10, r8
 ; SPLIT-ASM-NEXT:  // %bb.3: // %steady.stage1.bottom.and.stage0.top
 ; SPLIT-ASM-NEXT:    // in Loop: Header=BB0_1 Depth=1
-; SPLIT-ASM-NEXT:    mova r5, #16; paddb.2d [p3], d3; vshuffle x10, x1, x0, r4; vmac dm1, dm1, x5, x6, r8
+; SPLIT-ASM-NEXT:    mova r5, #16; paddb.2d [p3], d3; vshuffle x10, x1, x0, r4; vmac dm2, dm2, x5, x6, r8
 ; SPLIT-ASM-NEXT:    mova r17, #15; vldb x8, [p1], m4; vshuffle x8, x7, x0, r6; vmac dm0, dm0, x3, x6, r8
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cml4, s0, upssign1, [p4], #64; vshuffle x6, x8, x0, r16; vmac dm5, dm5, x5, x10, r8
-; SPLIT-ASM-NEXT:    vlda.ups.2x bmll2, s0, upssign1, [p3, #0]; vshuffle x1, x9, x0, r2; vmac dm3, dm3, x3, x10, r8
-; SPLIT-ASM-NEXT:    vldb x6, [p0], #64; vshuffle x10, x1, x0, r4; vmac dm1, dm1, x5, x6, r8
+; SPLIT-ASM-NEXT:    vlda.ups.2x bmll1, s0, upssign1, [p3, #0]; vshuffle x1, x9, x0, r2; vmac dm3, dm3, x3, x10, r8
+; SPLIT-ASM-NEXT:    vldb x6, [p0], #64; vshuffle x10, x1, x0, r4; vmac dm2, dm2, x5, x6, r8
 ; SPLIT-ASM-NEXT:    vshuffle x8, x7, x0, r6; vmac dm0, dm0, x3, x6, r8
 ; SPLIT-ASM-NEXT:    vshuffle x6, x8, x0, r16; vmac dm5, dm5, x5, x10, r8
 ; SPLIT-ASM-NEXT:    mov s0, r28; vmac dm3, dm3, x3, x10, r8
-; SPLIT-ASM-NEXT:    mov s1, r0; vmac dm1, dm1, x5, x6, r8
+; SPLIT-ASM-NEXT:    mov s1, r0; vmac dm2, dm2, x5, x6, r8
 ; SPLIT-ASM-NEXT:    mov srssign0, r18; vmac dm0, dm0, x3, x6, r8
 ; SPLIT-ASM-NEXT:    jnzd r3, r3, p5
 ; SPLIT-ASM-NEXT:    vmov cml5, cml4 // Delay Slot 5
 ; SPLIT-ASM-NEXT:    vst.srs.4x dm5, s1, srssign0, [p2], #64 // Delay Slot 4
 ; SPLIT-ASM-NEXT:    vst.srs.4x dm3, s1, srssign0, [p2], m5 // Delay Slot 3
-; SPLIT-ASM-NEXT:    vst.srs.4x dm1, s1, srssign0, [p2], #64 // Delay Slot 2
+; SPLIT-ASM-NEXT:    vst.srs.4x dm2, s1, srssign0, [p2], #64 // Delay Slot 2
 ; SPLIT-ASM-NEXT:    vst.2d.srs.4x dm0, s1, srssign0, [p2], d2; movx srssign0, #0; mov s1, r20 // Delay Slot 1
 ; SPLIT-ASM-NEXT:  // %bb.4: // %lastiter.stage1.top
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cmh5, s0, upssign1, [p4], #64
-; SPLIT-ASM-NEXT:    vlda.ups.2x cml2, s0, upssign1, [p4], #64; vsrs.2x wl10, bmll2, s1, srssign1
+; SPLIT-ASM-NEXT:    vlda.ups.2x cml2, s0, upssign1, [p4], #64; vsrs.2x wl10, bmll1, s1, srssign1
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cmh2, s0, upssign1, [p4], #64; vldb.3d x3, [p1], d1
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cml1, s0, upssign1, [p4], #64
 ; SPLIT-ASM-NEXT:    vlda.ups.2x cmh1, s0, upssign1, [p4], #64; vldb.3d x1, [p0], d0; vshuffle x8, x8, x0, r1
-; SPLIT-ASM-NEXT:    vlda.ups.2x cml0, s0, upssign1, [p4], #64; vsel.32 x2, x2, x10, r17
-; SPLIT-ASM-NEXT:    vlda.ups.2x cmh0, s0, upssign1, [p4], #64; vldb x3, [p1], m4; vshuffle x2, x8, x0, r24
-; SPLIT-ASM-NEXT:    vlda.3d x1, [p1], d1; vshift x8, x10, x0, r5; vmul dm4, x0, x2, r12
-; SPLIT-ASM-NEXT:    vldb x10, [p0], #64; vsel.32 x4, x4, x8, r17
-; SPLIT-ASM-NEXT:    vlda.3d x8, [p0], d0; vshuffle x8, x3, x0, r26; vaddmac dm5, dm5, dm4, x6, x2, r10
-; SPLIT-ASM-NEXT:    vldb x3, [p1], m4; vshuffle x2, x8, x0, r22; vmul dm4, x0, x4, r12
-; SPLIT-ASM-NEXT:    vlda.3d x1, [p1], d1; movxm ls, #.LBB0_5; vaddmac dm2, dm2, dm4, x1, x2, r10
-; SPLIT-ASM-NEXT:    vldb x10, [p0], #64; movxm le, #.L_LEnd0; vaddmac dm0, dm0, dm4, x1, x2, r10
-; SPLIT-ASM-NEXT:    vlda.3d x8, [p0], d0; vshuffle x6, x3, x0, r2; vaddmac dm1, dm1, dm4, x6, x2, r10
+; SPLIT-ASM-NEXT:    vlda.ups.2x cml0, s0, upssign1, [p4], #64; vsel.32 x4, x4, x10, r17
+; SPLIT-ASM-NEXT:    vlda.ups.2x cmh0, s0, upssign1, [p4], #64; vldb x3, [p1], m4; vshuffle x4, x8, x0, r24
+; SPLIT-ASM-NEXT:    vlda.3d x1, [p1], d1; vshift x8, x10, x0, r5; vmul dm4, x0, x4, r12
+; SPLIT-ASM-NEXT:    vldb x10, [p0], #64; vsel.32 x2, x2, x8, r17
+; SPLIT-ASM-NEXT:    vlda.3d x8, [p0], d0; vshuffle x8, x3, x0, r26; vaddmac dm5, dm5, dm4, x6, x4, r10
+; SPLIT-ASM-NEXT:    vldb x3, [p1], m4; vshuffle x4, x8, x0, r22; vmul dm4, x0, x2, r12
+; SPLIT-ASM-NEXT:    vlda.3d x1, [p1], d1; movxm ls, #.LBB0_5; vaddmac dm2, dm2, dm4, x1, x4, r10
+; SPLIT-ASM-NEXT:    vldb x10, [p0], #64; movxm le, #.L_LEnd0; vaddmac dm0, dm0, dm4, x1, x4, r10
+; SPLIT-ASM-NEXT:    vlda.3d x8, [p0], d0; vshuffle x6, x3, x0, r2; vaddmac dm1, dm1, dm4, x6, x4, r10
 ; SPLIT-ASM-NEXT:    nopa ; vldb x3, [p1], m4; nops ; add.nc lc, r30, #-3; vshuffle x4, x6, x0, r4; nopv
 ; SPLIT-ASM-NEXT:    vlda.3d x1, [p1], d1; nopb ; nops ; nopx ; vshuffle x2, x1, x0, r6; nopv
 ; SPLIT-ASM-NEXT:    nopa ; vldb x10, [p0], #64; nops ; nopx ; vshuffle x0, x2, x0, r16; vmac dm5, dm5, x10, x4, r8
