@@ -15,7 +15,6 @@
 #include "Utils/AIELoopUtils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -78,9 +77,9 @@ class StageSplitLoop {
   AIE::DataDependenceHelper Stage0DAG;
   AIE::DataDependenceHelper SteadyDAG;
   SmallVector<InstructionPair> Pairs;
-  DenseMap<MachineInstr *, unsigned> PairIndices;
+  DenseMap<const MachineInstr *, unsigned> PairIndices;
   DenseSet<std::pair<Register, Register>> CorrespondingRegs;
-  SmallSetVector<unsigned, 32> Selected;
+  DenseSet<unsigned> Selected;
   DenseMap<Register, Register> SteadyDefs;
   DenseMap<Register, Register> LastIterationDefs;
   DenseMap<Register, Register> ReplacedPHIs;
@@ -155,30 +154,26 @@ private:
     return haveCompatibleRegisters(TopReg, LatchReg);
   }
 
-  bool haveEquivalentOperands(const MachineOperand &TopMO,
-                              const MachineOperand &LatchMO) const {
-    if (!TopMO.isReg() || !LatchMO.isReg())
-      return TopMO.isIdenticalTo(LatchMO);
-    if (!haveEquivalentRegisterShape(TopMO, LatchMO))
-      return false;
-    Register TopReg = TopMO.getReg();
-    Register LatchReg = LatchMO.getReg();
-    return haveCompatibleRegisters(TopReg, LatchReg) &&
-           (TopReg.isPhysical() || TopReg == LatchReg ||
-            CorrespondingRegs.contains({TopReg, LatchReg}));
+  /// Whether the two instructions read the same values under the register
+  /// correspondence so far. Only valid once haveEquivalentShape passed.
+  bool haveCorrespondingRegisters(const MachineInstr &TopMI,
+                                  const MachineInstr &LatchMI) const {
+    for (auto [TopMO, LatchMO] :
+         zip_equal(TopMI.operands(), LatchMI.operands())) {
+      if (!TopMO.isReg())
+        continue;
+      Register TopReg = TopMO.getReg();
+      if (!TopReg.isPhysical() && TopReg != LatchMO.getReg() &&
+          !CorrespondingRegs.contains({TopReg, LatchMO.getReg()}))
+        return false;
+    }
+    return true;
   }
 
   bool areEquivalent(const MachineInstr &TopMI,
                      const MachineInstr &LatchMI) const {
-    if (TopMI.getOpcode() != LatchMI.getOpcode() ||
-        TopMI.getFlags() != LatchMI.getFlags() ||
-        TopMI.getNumOperands() != LatchMI.getNumOperands())
-      return false;
-    for (auto [TopMO, LatchMO] :
-         zip_equal(TopMI.operands(), LatchMI.operands()))
-      if (!haveEquivalentOperands(TopMO, LatchMO))
-        return false;
-    return true;
+    return haveEquivalentShape(TopMI, LatchMI) &&
+           haveCorrespondingRegisters(TopMI, LatchMI);
   }
 
   static bool isPairCandidate(const MachineInstr &MI) {
@@ -254,9 +249,9 @@ private:
   }
 
   static bool isMovable(const MachineInstr &MI) {
+    // isSafeToMove already rejects calls, inline asm, stores and ordered loads.
     bool SawStore = false;
-    return !MI.isCall() && !MI.isInlineAsm() && !MI.isNotDuplicable() &&
-           !MI.isConvergent() && !MI.hasOrderedMemoryRef() &&
+    return !MI.isNotDuplicable() && !MI.isConvergent() &&
            MI.isSafeToMove(SawStore);
   }
 
@@ -323,9 +318,7 @@ private:
       DenseSet<unsigned> Suffix;
       if (!collectSuffix(Index, Suffix))
         continue;
-      for (unsigned Candidate = 0; Candidate < Pairs.size(); ++Candidate)
-        if (Suffix.contains(Candidate))
-          Selected.insert(Candidate);
+      Selected.insert(Suffix.begin(), Suffix.end());
     }
   }
 
@@ -356,7 +349,7 @@ private:
   }
 
   bool isSelectedInstruction(const MachineInstr *MI) const {
-    auto It = PairIndices.find(const_cast<MachineInstr *>(MI));
+    auto It = PairIndices.find(MI);
     return It != PairIndices.end() && Selected.contains(It->second);
   }
 
@@ -393,8 +386,8 @@ private:
   Register getOrCreateSteadyInput(Register TopReg, Register LatchReg) {
     if (TopReg == LatchReg)
       return TopReg;
-    if (auto It = SteadyDefs.find(TopReg); It != SteadyDefs.end())
-      return It->second;
+    if (Register Moved = SteadyDefs.lookup(TopReg))
+      return Moved;
     if (MachineInstr *PHI = findMergePHI(TopReg, LatchReg))
       return PHI->getOperand(0).getReg();
 
@@ -410,11 +403,9 @@ private:
 
   void remapUses(InstructionPair &Pair, MachineInstr &SteadyMI,
                  MachineInstr &LastMI) {
-    for (unsigned I = 0; I < SteadyMI.getNumOperands(); ++I) {
-      MachineOperand &SteadyMO = SteadyMI.getOperand(I);
-      MachineOperand &LastMO = LastMI.getOperand(I);
-      const MachineOperand &TopMO = Pair.Stage0MI->getOperand(I);
-      const MachineOperand &LatchMO = Pair.SteadyMI->getOperand(I);
+    for (auto [SteadyMO, LastMO, TopMO, LatchMO] :
+         zip_equal(SteadyMI.operands(), LastMI.operands(),
+                   Pair.Stage0MI->operands(), Pair.SteadyMI->operands())) {
       if (!SteadyMO.isReg() || SteadyMO.isDef() ||
           !SteadyMO.getReg().isVirtual())
         continue;
@@ -422,25 +413,24 @@ private:
       Register TopReg = TopMO.getReg();
       Register LatchReg = LatchMO.getReg();
       SteadyMO.setReg(getOrCreateSteadyInput(TopReg, LatchReg));
-      if (auto It = LastIterationDefs.find(LatchReg);
-          It != LastIterationDefs.end())
-        LastMO.setReg(It->second);
-      else if (auto It = ReplacedPHIs.find(LatchReg); It != ReplacedPHIs.end())
-        LastMO.setReg(It->second);
+      if (Register Moved = LastIterationDefs.lookup(LatchReg))
+        LastMO.setReg(Moved);
+      else if (Register Rewritten = ReplacedPHIs.lookup(LatchReg))
+        LastMO.setReg(Rewritten);
     }
   }
 
   void remapDefinitions(InstructionPair &Pair, MachineInstr &SteadyMI,
                         MachineInstr &LastMI) {
-    for (unsigned I = 0; I < SteadyMI.getNumOperands(); ++I) {
-      MachineOperand &SteadyMO = SteadyMI.getOperand(I);
-      MachineOperand &LastMO = LastMI.getOperand(I);
+    for (auto [SteadyMO, LastMO, TopMO, LatchMO] :
+         zip_equal(SteadyMI.operands(), LastMI.operands(),
+                   Pair.Stage0MI->operands(), Pair.SteadyMI->operands())) {
       if (!SteadyMO.isReg() || !SteadyMO.isDef() ||
           !SteadyMO.getReg().isVirtual())
         continue;
 
-      Register TopReg = Pair.Stage0MI->getOperand(I).getReg();
-      Register LatchReg = Pair.SteadyMI->getOperand(I).getReg();
+      Register TopReg = TopMO.getReg();
+      Register LatchReg = LatchMO.getReg();
       Register SteadyReg = MRI.cloneVirtualRegister(TopReg);
       Register LastReg = MRI.cloneVirtualRegister(LatchReg);
       SteadyMO.setReg(SteadyReg);
@@ -484,27 +474,24 @@ private:
     for (auto [OldReg, NewReg] : ReplacedPHIs) {
       MachineInstr *PHI = MRI.getVRegDef(OldReg);
       assert(PHI && PHI->isPHI());
-      SmallVector<MachineOperand *, 8> Uses;
-      for (MachineOperand &Use : MRI.use_operands(OldReg))
-        Uses.push_back(&Use);
-      for (MachineOperand *Use : Uses)
-        Use->setReg(NewReg);
+      MRI.replaceRegWith(OldReg, NewReg);
       PHI->eraseFromParent();
     }
+  }
+
+  void eraseInstruction(MachineInstr *MI) {
+    for (MachineOperand &Def : MI->defs())
+      if (Def.getReg().isVirtual())
+        MRI.markUsesInDebugValueAsUndef(Def.getReg());
+    MI->eraseFromParent();
   }
 
   void eraseOriginalInstructions() {
     for (unsigned Index = Pairs.size(); Index-- > 0;) {
       if (!Selected.contains(Index))
         continue;
-      for (MachineOperand &Def : Pairs[Index].Stage0MI->defs())
-        if (Def.getReg().isVirtual())
-          MRI.markUsesInDebugValueAsUndef(Def.getReg());
-      for (MachineOperand &Def : Pairs[Index].SteadyMI->defs())
-        if (Def.getReg().isVirtual())
-          MRI.markUsesInDebugValueAsUndef(Def.getReg());
-      Pairs[Index].Stage0MI->eraseFromParent();
-      Pairs[Index].SteadyMI->eraseFromParent();
+      eraseInstruction(Pairs[Index].Stage0MI);
+      eraseInstruction(Pairs[Index].SteadyMI);
     }
   }
 
@@ -513,10 +500,9 @@ private:
     do {
       Changed = false;
       for (MachineInstr &PHI : make_early_inc_range(SteadyTop.phis())) {
-        Register Def = PHI.getOperand(0).getReg();
-        if (!MRI.use_nodbg_empty(Def))
+        if (!PHI.isDead(MRI))
           continue;
-        MRI.markUsesInDebugValueAsUndef(Def);
+        MRI.markUsesInDebugValueAsUndef(PHI.getOperand(0).getReg());
         PHI.eraseFromParent();
         Changed = true;
       }
