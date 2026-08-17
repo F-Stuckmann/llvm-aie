@@ -299,13 +299,13 @@ private:
   }
 
   unsigned getWorstPredecessorLatency(const InstructionPair &Pair) const {
+    // The edge latency, not SUnit::Latency: the question is how long this
+    // instruction waits for a value it consumes.
     const auto GetWorstLatency = [](const SUnit *SU) {
       unsigned WorstLatency = 0;
       for (const SDep &Dep : SU->Preds) {
-        const SUnit *PredSU = Dep.getSUnit();
-        if (!PredSU->isBoundaryNode())
-          WorstLatency =
-              std::max(WorstLatency, static_cast<unsigned>(PredSU->Latency));
+        if (!Dep.getSUnit()->isBoundaryNode())
+          WorstLatency = std::max(WorstLatency, Dep.getLatency());
       }
       return WorstLatency;
     };
