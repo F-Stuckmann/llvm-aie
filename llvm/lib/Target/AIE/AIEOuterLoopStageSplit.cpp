@@ -557,93 +557,80 @@ public:
 private:
   bool splitDeferredLoop(MachineFunction &MF, MachineLoopInfo &MLI,
                          AAResults &AA, MachineBasicBlock &SteadyBottom) {
-    verifyOLPCFG(SteadyBottom, MLI);
-    MachineLoop *L = MLI.getLoopFor(&SteadyBottom);
-    MachineBasicBlock *SteadyTop = L->getHeader();
-    MachineBasicBlock *Stage0Top = L->getLoopPreheader();
-    MachineBasicBlock *LastIterTop = nullptr;
-    for (MachineBasicBlock *Succ : SteadyBottom.successors())
-      if (Succ != SteadyTop)
-        LastIterTop = Succ;
-    assert(LastIterTop &&
-           LastIterTop->getName().contains("lastiter.stage1.top"));
+    std::optional<StageSplitBlocks> Blocks =
+        analyzeDeferredSplitCFG(SteadyBottom, MLI);
+    if (!Blocks)
+      return false;
 
-    StageSplitLoop Split(
-        MF, MLI, AA,
-        StageSplitBlocks{Stage0Top, SteadyTop, &SteadyBottom, LastIterTop});
+    StageSplitLoop Split(MF, MLI, AA, *Blocks);
     return Split.run();
   }
 
-  /// Verify the deferred-split CFG produced by the outer-loop pipeliner.
-  void verifyOLPCFG(const MachineBasicBlock &SteadyBottom,
-                    const MachineLoopInfo &MLI) {
+  /// Resolve the four blocks of the deferred-split region around \p
+  /// SteadyBottom; std::nullopt when the pipeliner's promised shape breaks.
+  static std::optional<StageSplitBlocks>
+  analyzeDeferredSplitCFG(MachineBasicBlock &SteadyBottom,
+                          const MachineLoopInfo &MLI) {
     const MachineLoop *L = MLI.getLoopFor(&SteadyBottom);
-    assert(L && L->getLoopLatch() == &SteadyBottom &&
-           "OLP marker must sit on the steady loop's unique latch");
+    if (!L || L->getLoopLatch() != &SteadyBottom)
+      return std::nullopt;
 
-    [[maybe_unused]] const MachineBasicBlock *SteadyTop = L->getHeader();
-    [[maybe_unused]] const MachineBasicBlock *Stage0Top = L->getLoopPreheader();
-    assert(Stage0Top &&
-           "OLP steady-state loop lacks the stage0.top preheader slot");
+    MachineBasicBlock *SteadyTop = L->getHeader();
+    MachineBasicBlock *Stage0Top = L->getLoopPreheader();
+    if (!Stage0Top)
+      return std::nullopt;
 
     // The stage-0 slot has one entry and falls through to the steady header.
-    assert(Stage0Top->pred_size() == 1 &&
-           "stage0.top must have a single predecessor (outer preheader)");
-    assert(Stage0Top->succ_size() == 1 && Stage0Top->isSuccessor(SteadyTop) &&
-           "stage0.top must fall through only to the steady header");
+    if (Stage0Top->pred_size() != 1 || Stage0Top->succ_size() != 1 ||
+        !Stage0Top->isSuccessor(SteadyTop))
+      return std::nullopt;
 
-    // The steady header merges the stage-0 entry and backedge.
-    assert(SteadyTop->pred_size() == 2 && Stage0Top->isSuccessor(SteadyTop) &&
-           SteadyBottom.isSuccessor(SteadyTop) &&
-           "steady header must be entered only from stage0.top and the latch");
-    assert(SteadyTop->succ_size() == 1 &&
-           L->contains(*SteadyTop->succ_begin()) &&
-           "steady header must fall into the inner-loop region");
+    // The steady header merges the stage-0 entry and the backedge, and falls
+    // into the inner-loop region.
+    if (SteadyTop->pred_size() != 2 || !SteadyBottom.isSuccessor(SteadyTop) ||
+        SteadyTop->succ_size() != 1 || !L->contains(*SteadyTop->succ_begin()))
+      return std::nullopt;
 
     // The latch has one inner predecessor, a backedge, and an exit.
-    assert(SteadyBottom.succ_size() == 2 &&
-           SteadyBottom.isSuccessor(SteadyTop) &&
-           "steady latch must have a backedge and one exit successor");
-    [[maybe_unused]] const MachineBasicBlock *Exit = nullptr;
-    for (const MachineBasicBlock *Succ : SteadyBottom.successors())
-      if (Succ != SteadyTop)
-        Exit = Succ;
-    assert(Exit && !L->contains(Exit) &&
-           "steady latch's non-backedge successor must leave the loop");
-    assert(SteadyBottom.pred_size() == 1 &&
-           L->contains(*SteadyBottom.pred_begin()) &&
-           "steady latch must be entered only from the inner-loop exit");
+    if (SteadyBottom.succ_size() != 2 || SteadyBottom.pred_size() != 1 ||
+        !L->contains(*SteadyBottom.pred_begin()))
+      return std::nullopt;
 
+    // The non-backedge successor leaves the loop into the last iteration.
+    MachineBasicBlock *LastIterTop = nullptr;
+    for (MachineBasicBlock *Succ : SteadyBottom.successors()) {
+      const bool IsBackedge = Succ == SteadyTop;
+      if (!IsBackedge)
+        LastIterTop = Succ;
+    }
+    if (!LastIterTop || L->contains(LastIterTop))
+      return std::nullopt;
+
+    // The last-iteration region is a distinct peeled loop below LastIterTop.
+    if (LastIterTop->pred_size() != 1 || LastIterTop->succ_size() != 1)
+      return std::nullopt;
+
+    const MachineLoop *LastIterLoop =
+        MLI.getLoopFor(*LastIterTop->succ_begin());
+    if (!LastIterLoop || LastIterLoop == L ||
+        LastIterLoop->getLoopPreheader() != LastIterTop)
+      return std::nullopt;
+
+    const MachineBasicBlock *LastIterBottom = LastIterLoop->getExitBlock();
+    if (!LastIterBottom || LastIterLoop->contains(LastIterBottom) ||
+        LastIterBottom->succ_size() != 1)
+      return std::nullopt;
+
+    // Names are derived from IR and can be stripped, so they only cross-check
+    // the structural result; they never decide it.
     assert(SteadyBottom.getName().contains("steady.stage1.bottom") &&
            SteadyTop->getName().contains("steady.stage1.top") &&
            Stage0Top->getName().contains("stage0.top") &&
-           "unexpected steady-loop block naming");
-
-    if (!Exit->getName().contains("lastiter"))
-      return;
-
-    [[maybe_unused]] const MachineBasicBlock *LastIterTop = Exit;
-    assert(!L->contains(LastIterTop) &&
-           "last-iteration region must lie outside the steady loop");
-    assert(LastIterTop->pred_size() == 1 &&
-           SteadyBottom.isSuccessor(LastIterTop) &&
-           "lastiter top must be entered only from the steady latch");
-    assert(LastIterTop->succ_size() == 1 &&
-           "lastiter top must fall into the peeled inner loop");
-
-    [[maybe_unused]] const MachineLoop *IL =
-        MLI.getLoopFor(*LastIterTop->succ_begin());
-    assert(IL && IL != L && IL->getLoopPreheader() == LastIterTop &&
-           "lastiter inner loop must be a distinct loop below lastiter top");
-
-    [[maybe_unused]] const MachineBasicBlock *LastIterBottom =
-        IL->getExitBlock();
-    assert(LastIterBottom && !IL->contains(LastIterBottom) &&
-           LastIterBottom->succ_size() == 1 &&
-           "lastiter bottom must leave the peeled loop and fall through once");
-    assert(LastIterTop->getName().contains("lastiter.stage1.top") &&
+           LastIterTop->getName().contains("lastiter.stage1.top") &&
            LastIterBottom->getName().contains("lastiter.stage1.bottom") &&
-           "unexpected last-iteration block naming");
+           "unexpected deferred-split block naming");
+
+    return StageSplitBlocks{Stage0Top, SteadyTop, &SteadyBottom, LastIterTop};
   }
 };
 
